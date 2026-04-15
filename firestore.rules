@@ -1,0 +1,217 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    // Collection: bookings
+    // Fields: date, customerName, paxCount, flightNumber, operationType, vehicleType, city, location, airport, supplierId, driverId, carNumber, driverName, notes, supplierPrice, customerPrice, currency, paymentMethod, status, tips, waitingFee, overnightFee, additions, deductions, totalNet, createdAt, createdBy
+    
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null && request.auth.uid != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        (request.auth.token.email == "didoghalab2@gmail.com" && request.auth.token.email_verified == true ||
+         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'));
+    }
+
+    function isValidBooking(data) {
+      return data.customerId is string &&
+             data.operationType in ['arrival', 'departure', 'overday_luxor', 'overday_cairo', 'transfer_cairo', 'transfer_aswan', 'transfer_abu_simbel', 'transfer_other', 'internal_transfer', 'sea_trip', 'safari', 'city_tour'] &&
+             data.vehicleType in ['limousine', 'microbus', 'coaster', 'bus'] &&
+             data.from is string && data.to is string &&
+             data.customerPrice is number && data.customerPrice >= 0 &&
+             (!('collectedAmount' in data) || data.collectedAmount is number) &&
+             (!('collectedCurrency' in data) || data.collectedCurrency in ['EGP', 'USD', 'EUR']) &&
+             (!('visaPrice' in data) || data.visaPrice is number) &&
+             (!('visaCurrency' in data) || data.visaCurrency in ['EGP', 'USD', 'EUR']) &&
+             (!('visaCount' in data) || data.visaCount is number) &&
+             (!('visaExpenses' in data) || data.visaExpenses is number) &&
+             (!('permitType' in data) || data.permitType in ['none', 'customer', 'company']) &&
+             (!('permitCost' in data) || data.permitCost is number) &&
+             (!('meetingTime' in data) || data.meetingTime is string) &&
+             (!('status' in data) || data.status in ['on_request', 'unconfirmed', 'confirmed', 'completed', 'cancelled']);
+    }
+
+    function isValidVehicle(data) {
+      return data.plateNumber is string && data.plateNumber.size() > 0 &&
+             data.type in ['limousine', 'microbus', 'coaster', 'bus'] &&
+             data.owner in ['company', 'supplier'] &&
+             (!('tourismChamberFees' in data) || data.tourismChamberFees is number) &&
+             (!('licenseRenewalCost' in data) || data.licenseRenewalCost is number) &&
+             (!('routineInsuranceCost' in data) || data.routineInsuranceCost is number) &&
+             (!('externalInsuranceCost' in data) || data.externalInsuranceCost is number) &&
+             (!('externalInsuranceCompany' in data) || data.externalInsuranceCompany is string) &&
+             (!('currentKm' in data) || data.currentKm is number) &&
+             (!('lastTireChangeKm' in data) || data.lastTireChangeKm is number) &&
+             (!('tireChangeIntervalKm' in data) || data.tireChangeIntervalKm is number) &&
+             (!('lastMaintenanceKm' in data) || data.lastMaintenanceKm is number) &&
+             (!('maintenanceIntervalKm' in data) || data.maintenanceIntervalKm is number);
+    }
+
+    function isValidCustomer(data) {
+      return data.name is string && data.name.size() > 0 &&
+             data.phone is string && data.phone.size() > 0 &&
+             data.type in ['individual', 'company', 'agency'] &&
+             (!('paymentMethod' in data) || data.paymentMethod in ['cash', 'instapay', 'bank_transfer', 'e_wallet']) &&
+             (!('currency' in data) || data.currency in ['EGP', 'USD', 'EUR']) &&
+             (!('initialBalance' in data) || data.initialBalance is number);
+    }
+
+    function isValidExpense(data) {
+      return data.date is string &&
+             data.category in ['administrative', 'operating'] &&
+             data.subCategory is string &&
+             data.amount is number && data.amount > 0 &&
+             data.currency in ['EGP', 'USD', 'EUR'] &&
+             data.description is string;
+    }
+
+    function isValidPriceList(data) {
+      return data.name is string && data.name.size() > 0 &&
+             data.targetId is string &&
+             data.targetType in ['customer', 'supplier'] &&
+             data.prices is list;
+    }
+
+    function isValidAccount(data) {
+      return data.name is string && data.name.size() > 0 &&
+             data.type in ['safe', 'bank'] &&
+             data.currency in ['EGP', 'USD', 'EUR'] &&
+             data.balance is number;
+    }
+
+    function isValidTransaction(data) {
+      return data.date is string &&
+             data.type in ['income', 'expense', 'transfer'] &&
+             data.amount is number && data.amount > 0 &&
+             data.currency in ['EGP', 'USD', 'EUR'] &&
+             data.paymentMethod in ['cash', 'instapay', 'bank_transfer', 'e_wallet', 'check'] &&
+             data.accountId is string &&
+             data.category is string &&
+             data.description is string;
+    }
+
+    function isValidDriver(data) {
+      return data.name is string && data.name.size() > 0 &&
+             data.phone is string && data.phone.size() > 0 &&
+             data.carNumber is string &&
+             (!('insuranceCost' in data) || data.insuranceCost is number) &&
+             (!('insuranceExpiry' in data) || data.insuranceExpiry is string);
+    }
+
+    function isValidTaxRecord(data) {
+      return data.date is string &&
+             data.type in ['vat_collected', 'vat_paid', 'wh_tax_paid', 'wh_tax_collected'] &&
+             data.amount is number && data.amount >= 0 &&
+             data.description is string;
+    }
+
+    function isValidAppSettings(data) {
+      return data.companyName is string && data.companyName.size() > 0 &&
+             data.setupCompleted is bool;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+    
+    match /accounts/{accountId} {
+      allow get, list: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidAccount(request.resource.data);
+      allow update: if isAuthenticated() && isValidAccount(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /priceLists/{priceListId} {
+      allow get, list: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidPriceList(request.resource.data);
+      allow update: if isAuthenticated() && isValidPriceList(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /users/{userId} {
+      allow get, list: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow write: if isAdmin();
+    }
+
+    match /bookings/{bookingId} {
+      allow get, list: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidBooking(request.resource.data);
+      allow update: if isAuthenticated() && isValidBooking(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /vehicles/{vehicleId} {
+      allow get, list: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidVehicle(request.resource.data);
+      allow update: if isAuthenticated() && isValidVehicle(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /customers/{customerId} {
+      allow get, list: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidCustomer(request.resource.data);
+      allow update: if isAuthenticated() && isValidCustomer(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /invoices/{invoiceId} {
+      allow get, list: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
+    match /suppliers/{supplierId} {
+      allow get, list: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
+    match /drivers/{driverId} {
+      allow get, list: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidDriver(request.resource.data);
+      allow update: if isAuthenticated() && isValidDriver(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /maintenance/{maintenanceId} {
+      allow get, list: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
+    match /fuel/{fuelId} {
+      allow get, list: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
+    match /expenses/{expenseId} {
+      allow get, list: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidExpense(request.resource.data);
+      allow update: if isAuthenticated() && isValidExpense(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /transactions/{transactionId} {
+      allow get, list: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidTransaction(request.resource.data);
+      allow update: if isAuthenticated() && isValidTransaction(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /settings/{docId} {
+      allow get: if isAuthenticated();
+      allow write: if isAdmin() && isValidAppSettings(request.resource.data);
+    }
+
+    match /tax_records/{recordId} {
+      allow get, list: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidTaxRecord(request.resource.data);
+      allow update: if isAuthenticated() && isValidTaxRecord(request.resource.data);
+      allow delete: if isAdmin();
+    }
+  }
+}

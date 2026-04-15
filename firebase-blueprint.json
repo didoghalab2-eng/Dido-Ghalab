@@ -1,0 +1,356 @@
+{
+  "entities": {
+    "Booking": {
+      "title": "Booking",
+      "description": "A transportation booking record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "customerId": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerType": { "type": "string", "enum": ["manual", "existing"] },
+        "paxCount": { "type": "number" },
+        "flightNumber": { "type": "string" },
+        "operationType": { "type": "string", "enum": ["arrival", "departure", "overday_luxor", "overday_cairo", "transfer_cairo", "transfer_aswan", "transfer_abu_simbel", "transfer_other", "internal_transfer", "sea_trip", "safari", "city_tour"] },
+        "vehicleType": { "type": "string", "enum": ["limousine", "microbus", "coaster", "bus"] },
+        "vehicleId": { "type": "string" },
+        "from": { "type": "string" },
+        "to": { "type": "string" },
+        "city": { "type": "string" },
+        "location": { "type": "string" },
+        "airport": { "type": "string" },
+        "meetingTime": { "type": "string" },
+        "supplierId": { "type": "string" },
+        "supplierName": { "type": "string" },
+        "driverId": { "type": "string" },
+        "carNumber": { "type": "string" },
+        "driverName": { "type": "string" },
+        "notes": { "type": "string" },
+        "supplierPrice": { "type": "number" },
+        "customerPrice": { "type": "number" },
+        "collectedAmount": { "type": "number" },
+        "collectedCurrency": { "type": "string", "enum": ["EGP", "USD", "EUR"] },
+        "visaPrice": { "type": "number" },
+        "visaCurrency": { "type": "string", "enum": ["EGP", "USD", "EUR"] },
+        "visaCount": { "type": "number" },
+        "visaExpenses": { "type": "number" },
+        "currency": { "type": "string", "enum": ["EGP", "USD", "EUR"] },
+        "paymentMethod": { "type": "string", "enum": ["cash", "instapay", "bank_transfer", "e_wallet"] },
+        "status": { "type": "string", "enum": ["on_request", "unconfirmed", "confirmed", "completed", "cancelled"] },
+        "tips": { "type": "number" },
+        "waitingFee": { "type": "number" },
+        "overnightFee": { "type": "number" },
+        "additions": { "type": "number" },
+        "deductions": { "type": "number" },
+        "otherExpenses": { "type": "number" },
+        "totalNet": { "type": "number" },
+        "permitType": { "type": "string", "enum": ["none", "customer", "company"] },
+        "permitCost": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "createdBy": { "type": "string" }
+      },
+      "required": ["date", "customerId", "operationType", "vehicleType", "from", "to"]
+    },
+    "Vehicle": {
+      "title": "Vehicle",
+      "description": "A vehicle record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "plateNumber": { "type": "string" },
+        "model": { "type": "string" },
+        "type": { "type": "string", "enum": ["limousine", "microbus", "coaster", "bus"] },
+        "owner": { "type": "string", "enum": ["company", "supplier"] },
+        "supplierId": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "maintenance", "inactive"] },
+        "tourismChamberFees": { "type": "number" },
+        "licenseRenewalCost": { "type": "number" },
+        "licenseExpiryDate": { "type": "string", "format": "date" },
+        "routineInsuranceCost": { "type": "number" },
+        "routineInsuranceExpiry": { "type": "string", "format": "date" },
+        "externalInsuranceCost": { "type": "number" },
+        "externalInsuranceExpiry": { "type": "string", "format": "date" },
+        "externalInsuranceCompany": { "type": "string" },
+        "currentKm": { "type": "number" },
+        "lastTireChangeKm": { "type": "number" },
+        "tireChangeIntervalKm": { "type": "number" },
+        "lastMaintenanceKm": { "type": "number" },
+        "maintenanceIntervalKm": { "type": "number" }
+      },
+      "required": ["plateNumber", "model", "type", "owner", "status"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "A customer record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "type": { "type": "string", "enum": ["individual", "company", "agency"] },
+        "address": { "type": "string" },
+        "paymentMethod": { "type": "string", "enum": ["cash", "instapay", "bank_transfer", "e_wallet"] },
+        "currency": { "type": "string", "enum": ["EGP", "USD", "EUR"] },
+        "initialBalance": { "type": "number" }
+      },
+      "required": ["name", "phone", "type"]
+    },
+    "Invoice": {
+      "title": "Invoice",
+      "description": "An invoice record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "number": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "dueDate": { "type": "string", "format": "date-time" },
+        "targetId": { "type": "string" },
+        "targetType": { "type": "string", "enum": ["customer", "supplier"] },
+        "subtotal": { "type": "number" },
+        "tax": { "type": "number" },
+        "total": { "type": "number" },
+        "status": { "type": "string", "enum": ["draft", "sent", "paid", "overdue"] }
+      },
+      "required": ["number", "date", "targetId", "targetType", "total"]
+    },
+    "Supplier": {
+      "title": "Supplier",
+      "description": "A transportation service supplier",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" }
+      },
+      "required": ["name"]
+    },
+    "Driver": {
+      "title": "Driver",
+      "description": "A driver record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "carNumber": { "type": "string" },
+        "carType": { "type": "string" },
+        "pettyCash": { "type": "number" },
+        "insuranceCost": { "type": "number" },
+        "insuranceExpiry": { "type": "string", "format": "date" }
+      },
+      "required": ["name", "carNumber"]
+    },
+    "Maintenance": {
+      "title": "Maintenance",
+      "description": "Vehicle maintenance record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "carNumber": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "type": { "type": "string" },
+        "cost": { "type": "number" },
+        "paymentMethod": { "type": "string" },
+        "faultType": { "type": "string" },
+        "location": { "type": "string", "enum": ["agency", "workshop"] },
+        "kilometers": { "type": "number" }
+      },
+      "required": ["carNumber", "date", "type", "cost"]
+    },
+    "Fuel": {
+      "title": "Fuel",
+      "description": "Fuel consumption record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "carNumber": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "amount": { "type": "number" },
+        "cost": { "type": "number" },
+        "kilometers": { "type": "number" }
+      },
+      "required": ["carNumber", "date", "amount", "cost", "kilometers"]
+    },
+    "PriceList": {
+      "title": "PriceList",
+      "description": "A list of prices for routes and vehicle types",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "targetId": { "type": "string" },
+        "targetType": { "type": "string", "enum": ["customer", "supplier"] },
+        "prices": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "operationType": { "type": "string" },
+              "region": { "type": "string" },
+              "route": { "type": "string" },
+              "vehicleType": { "type": "string", "enum": ["limousine", "microbus", "coaster", "bus"] },
+              "price": { "type": "number" },
+              "currency": { "type": "string", "enum": ["EGP", "USD", "EUR"] }
+            },
+            "required": ["operationType", "vehicleType", "price", "currency"]
+          }
+        }
+      },
+      "required": ["name", "targetId", "targetType", "prices"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "Categorized expenses for accounting",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "category": { "type": "string", "enum": ["administrative", "operating"] },
+        "subCategory": { "type": "string" },
+        "amount": { "type": "number" },
+        "currency": { "type": "string", "enum": ["EGP", "USD", "EUR"] },
+        "description": { "type": "string" },
+        "paymentMethod": { "type": "string" },
+        "accountId": { "type": "string" },
+        "referenceId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["date", "category", "subCategory", "amount", "currency", "description"]
+    },
+    "Account": {
+      "title": "Account",
+      "description": "A financial account (Safe or Bank)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string", "enum": ["safe", "bank"] },
+        "currency": { "type": "string", "enum": ["EGP", "USD", "EUR"] },
+        "balance": { "type": "number" },
+        "bankDetails": {
+          "type": "object",
+          "properties": {
+            "accountNumber": { "type": "string" },
+            "bankName": { "type": "string" }
+          }
+        }
+      },
+      "required": ["name", "type", "currency", "balance"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "A financial transaction record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "type": { "type": "string", "enum": ["income", "expense", "transfer"] },
+        "amount": { "type": "number" },
+        "currency": { "type": "string", "enum": ["EGP", "USD", "EUR"] },
+        "paymentMethod": { "type": "string", "enum": ["cash", "instapay", "bank_transfer", "e_wallet", "check"] },
+        "checkDetails": {
+          "type": "object",
+          "properties": {
+            "number": { "type": "string" },
+            "dueDate": { "type": "string", "format": "date" }
+          }
+        },
+        "accountId": { "type": "string" },
+        "toAccountId": { "type": "string" },
+        "category": { "type": "string" },
+        "referenceId": { "type": "string" },
+        "description": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "createdBy": { "type": "string" }
+      },
+      "required": ["date", "type", "amount", "currency", "paymentMethod", "accountId", "category", "description"]
+    },
+    "AppSettings": {
+      "title": "AppSettings",
+      "description": "Global application settings",
+      "type": "object",
+      "properties": {
+        "companyName": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "setupCompleted": { "type": "boolean" }
+      },
+      "required": ["companyName", "setupCompleted"]
+    },
+    "TaxRecord": {
+      "title": "TaxRecord",
+      "description": "A record for tax tracking (VAT/Withholding)",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string", "format": "date-time" },
+        "type": { "type": "string", "enum": ["vat_collected", "vat_paid", "wh_tax_paid", "wh_tax_collected"] },
+        "amount": { "type": "number" },
+        "invoiceId": { "type": "string" },
+        "invoiceNumber": { "type": "string" },
+        "description": { "type": "string" }
+      },
+      "required": ["date", "type", "amount", "description"]
+    }
+  },
+  "firestore": {
+    "/bookings/{bookingId}": {
+      "schema": "Booking",
+      "description": "Collection of all transport bookings"
+    },
+    "/suppliers/{supplierId}": {
+      "schema": "Supplier",
+      "description": "Collection of transport suppliers"
+    },
+    "/drivers/{driverId}": {
+      "schema": "Driver",
+      "description": "Collection of drivers"
+    },
+    "/maintenance/{maintenanceId}": {
+      "schema": "Maintenance",
+      "description": "Collection of vehicle maintenance records"
+    },
+    "/fuel/{fuelId}": {
+      "schema": "Fuel",
+      "description": "Collection of fuel consumption records"
+    },
+    "/vehicles/{vehicleId}": {
+      "schema": "Vehicle",
+      "description": "Collection of company and supplier vehicles"
+    },
+    "/customers/{customerId}": {
+      "schema": "Customer",
+      "description": "Collection of customers and agencies"
+    },
+    "/invoices/{invoiceId}": {
+      "schema": "Invoice",
+      "description": "Collection of customer and supplier invoices"
+    },
+    "/expenses/{expenseId}": {
+      "schema": "Expense",
+      "description": "Collection of categorized expenses"
+    },
+    "/priceLists/{priceListId}": {
+      "schema": "PriceList",
+      "description": "Collection of route price lists"
+    },
+    "/accounts/{accountId}": {
+      "schema": "Account",
+      "description": "Collection of financial accounts"
+    },
+    "/transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "Collection of financial transactions"
+    },
+    "/settings/{docId}": {
+      "schema": "AppSettings",
+      "description": "Global application settings"
+    },
+    "/tax_records/{recordId}": {
+      "schema": "TaxRecord",
+      "description": "Collection of tax tracking records"
+    }
+  }
+}
