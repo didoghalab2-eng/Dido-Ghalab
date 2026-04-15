@@ -32,11 +32,15 @@ import { Badge } from '@/components/ui/badge';
 import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import { InvoiceForm } from './InvoiceForm';
+import { InvoicePrintView } from './InvoicePrintView';
+import { useAuth } from '@/lib/AuthContext';
 
 export function InvoicesList() {
+  const { settings } = useAuth();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
+  const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
 
   useEffect(() => {
     const unsubscribe = subscribeToCollection<Invoice>('invoices', (data) => {
@@ -121,7 +125,12 @@ export function InvoicesList() {
                     <TableCell>{getStatusBadge(invoice.status)}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
-                        <Button variant="ghost" size="icon" className="hover:bg-blue-50 hover:text-blue-600 rounded-lg">
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="hover:bg-blue-50 hover:text-blue-600 rounded-lg"
+                          onClick={() => setSelectedInvoice(invoice)}
+                        >
                           <Download className="w-4 h-4" />
                         </Button>
                         <DropdownMenu>
@@ -150,6 +159,14 @@ export function InvoicesList() {
           </Table>
         </div>
       </div>
+
+      {selectedInvoice && (
+        <InvoicePrintView 
+          invoice={selectedInvoice} 
+          settings={settings} 
+          onClose={() => setSelectedInvoice(null)} 
+        />
+      )}
     </div>
   );
 }

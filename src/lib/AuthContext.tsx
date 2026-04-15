@@ -1,8 +1,10 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
-import { getDocument, subscribeToDocument } from '@/lib/firestore';
+import { getDocument, subscribeToDocument, setDocument } from '@/lib/firestore';
 import { UserRole, AppSettings, UserProfile } from '@/types';
+
+const MASTER_ADMIN_EMAIL = 'didoghalab2@gmail.com';
 
 interface AuthContextType {
   user: User | null;
@@ -34,8 +36,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (userData) {
           setRole(userData.role);
         } else {
-          // Default role for now
-          setRole('admin'); 
+          // New user logic
+          const isMasterAdmin = firebaseUser.email === MASTER_ADMIN_EMAIL;
+          const newRole: UserRole = isMasterAdmin ? 'admin' : 'expenses'; // Default to lowest privilege
+          
+          const newProfile: UserProfile = {
+            id: firebaseUser.uid,
+            email: firebaseUser.email || '',
+            role: newRole
+          };
+          
+          await setDocument('users', firebaseUser.uid, newProfile);
+          setRole(newRole);
         }
       } else {
         setRole(null);

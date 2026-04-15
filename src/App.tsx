@@ -14,6 +14,7 @@ import { VehiclesList } from './components/VehiclesList';
 import { CustomersList } from './components/CustomersList';
 import { InvoicesList } from './components/InvoicesList';
 import { PriceLists } from './components/PriceLists';
+import { UsersManagement } from './components/UsersManagement';
 import { SetupScreen } from './components/SetupScreen';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { Toaster } from '@/components/ui/sonner';
@@ -25,11 +26,12 @@ import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 function AppContent() {
   const { user, role, settings, loading } = useAuth();
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   useEffect(() => {
     // Redirect if role doesn't have access to current tab
     const permissions: Record<string, string[]> = {
-      admin: ['dashboard', 'bookings', 'customers', 'drivers', 'vehicles', 'suppliers', 'maintenance', 'fuel', 'accounting', 'treasury', 'invoices', 'price-lists', 'settings'],
+      admin: ['dashboard', 'bookings', 'customers', 'drivers', 'vehicles', 'suppliers', 'maintenance', 'fuel', 'accounting', 'treasury', 'invoices', 'price-lists', 'users', 'settings'],
       bookings: ['dashboard', 'bookings'],
       accountant: ['dashboard', 'accounting', 'invoices', 'price-lists', 'customers', 'suppliers'],
       expenses: ['dashboard', 'accounting'], // Expenses user only sees accounting (to add expenses)
@@ -54,7 +56,8 @@ function AppContent() {
   if (!user) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-slate-900 p-4">
-        <div className="w-full max-w-md bg-slate-800 rounded-3xl p-8 border border-slate-700 shadow-2xl text-center">
+        <div className="w-full max-w-md bg-slate-800 rounded-3xl p-8 border border-slate-700 shadow-2xl text-center relative">
+          <div className="absolute top-4 right-6 text-[10px] text-slate-600 font-mono">v2.0.4-debug</div>
           <div className="flex justify-center mb-8">
             <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center shadow-xl shadow-blue-600/20">
               <Truck className="w-10 h-10 text-white" />
@@ -63,12 +66,36 @@ function AppContent() {
           <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">Alamed</h1>
           <p className="text-slate-400 mb-8">نظام إدارة النقل السياحي المتكامل</p>
           <Button 
-            onClick={() => signInWithPopup(auth, new GoogleAuthProvider())}
-            className="w-full bg-white hover:bg-slate-100 text-slate-900 h-12 rounded-xl font-bold gap-3 transition-all"
+            disabled={isLoggingIn}
+            onClick={async () => {
+              setIsLoggingIn(true);
+              try {
+                console.log("Starting Google Login...");
+                const provider = new GoogleAuthProvider();
+                provider.setCustomParameters({ prompt: 'select_account' });
+                const result = await signInWithPopup(auth, provider);
+                console.log("Login Success:", result.user.email);
+                toast.success(`مرحباً ${result.user.displayName || 'بك'}`);
+              } catch (error: any) {
+                console.error("Login Error Details:", error);
+                toast.error(`خطأ في تسجيل الدخول: ${error.message || 'يرجى المحاولة مرة أخرى'}`);
+              } finally {
+                setIsLoggingIn(false);
+              }
+            }}
+            className="w-full bg-white hover:bg-slate-100 text-slate-900 h-12 rounded-xl font-bold gap-3 transition-all disabled:opacity-50"
           >
-            <LogIn className="w-5 h-5" />
-            تسجيل الدخول بواسطة جوجل
+            {isLoggingIn ? (
+              <div className="w-5 h-5 border-2 border-slate-900 border-t-transparent rounded-full animate-spin" />
+            ) : (
+              <LogIn className="w-5 h-5" />
+            )}
+            {isLoggingIn ? 'جاري الاتصال...' : 'تسجيل الدخول بواسطة جوجل'}
           </Button>
+          
+          <p className="mt-6 text-[10px] text-slate-500 leading-relaxed">
+            إذا لم تفتح نافذة تسجيل الدخول، يرجى التأكد من السماح بالنوافذ المنبثقة أو الضغط على Ctrl+Shift+I لتصوير الخطأ.
+          </p>
         </div>
       </div>
     );
@@ -104,6 +131,8 @@ function AppContent() {
         return <InvoicesList />;
       case 'price-lists':
         return <PriceLists />;
+      case 'users':
+        return <UsersManagement />;
       case 'settings':
         return <Settings />;
       default:

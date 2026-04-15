@@ -41,6 +41,7 @@ const navItems = [
   { id: 'treasury', label: 'الخزنة والحسابات', icon: Wallet },
   { id: 'invoices', label: 'الفواتير', icon: FileText },
   { id: 'price-lists', label: 'قوائم الأسعار', icon: DollarSign },
+  { id: 'users', label: 'المستخدمين', icon: Users },
   { id: 'settings', label: 'الإعدادات', icon: Settings },
 ];
 
@@ -48,7 +49,7 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
   const { user, role, settings } = useAuth();
 
   const permissions: Record<string, string[]> = {
-    admin: ['dashboard', 'bookings', 'customers', 'drivers', 'vehicles', 'suppliers', 'maintenance', 'fuel', 'accounting', 'treasury', 'invoices', 'price-lists', 'settings'],
+    admin: ['dashboard', 'bookings', 'customers', 'drivers', 'vehicles', 'suppliers', 'maintenance', 'fuel', 'accounting', 'treasury', 'invoices', 'price-lists', 'users', 'settings'],
     bookings: ['dashboard', 'bookings'],
     accountant: ['dashboard', 'accounting', 'invoices', 'price-lists', 'customers', 'suppliers'],
     expenses: ['dashboard', 'accounting'],
