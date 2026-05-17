@@ -8,6 +8,7 @@ import { DriversList } from '@/components/DriversList';
 import { MaintenanceList } from '@/components/MaintenanceList';
 import { FuelList } from '@/components/FuelList';
 import { Accounting } from '@/components/Accounting';
+import { ExpensesManagement } from '@/components/ExpensesManagement';
 import { Treasury } from '@/components/Treasury';
 import { Settings } from '@/components/Settings';
 import { VehiclesList } from './components/VehiclesList';
@@ -18,6 +19,7 @@ import { UsersManagement } from './components/UsersManagement';
 import { SetupScreen } from './components/SetupScreen';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { Toaster } from '@/components/ui/sonner';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { LogIn, Truck } from 'lucide-react';
 import { auth } from '@/lib/firebase';
@@ -31,10 +33,10 @@ function AppContent() {
   useEffect(() => {
     // Redirect if role doesn't have access to current tab
     const permissions: Record<string, string[]> = {
-      admin: ['dashboard', 'bookings', 'customers', 'drivers', 'vehicles', 'suppliers', 'maintenance', 'fuel', 'accounting', 'treasury', 'invoices', 'price-lists', 'users', 'settings'],
+      admin: ['dashboard', 'bookings', 'customers', 'drivers', 'vehicles', 'suppliers', 'maintenance', 'fuel', 'expenses-management', 'accounting', 'treasury', 'invoices', 'price-lists', 'users', 'settings'],
       bookings: ['dashboard', 'bookings'],
-      accountant: ['dashboard', 'accounting', 'invoices', 'price-lists', 'customers', 'suppliers'],
-      expenses: ['dashboard', 'accounting'], // Expenses user only sees accounting (to add expenses)
+      accountant: ['dashboard', 'expenses-management', 'accounting', 'treasury', 'invoices', 'price-lists', 'customers', 'suppliers'],
+      expenses: ['dashboard', 'expenses-management', 'accounting'], // Expenses user only sees accounting (to add expenses)
     };
 
     if (role && !permissions[role].includes(activeTab)) {
@@ -57,13 +59,12 @@ function AppContent() {
     return (
       <div className="flex items-center justify-center min-h-screen bg-slate-900 p-4">
         <div className="w-full max-w-md bg-slate-800 rounded-3xl p-8 border border-slate-700 shadow-2xl text-center relative">
-          <div className="absolute top-4 right-6 text-[10px] text-slate-600 font-mono">v2.0.4-debug</div>
           <div className="flex justify-center mb-8">
             <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center shadow-xl shadow-blue-600/20">
               <Truck className="w-10 h-10 text-white" />
             </div>
           </div>
-          <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">Alamed</h1>
+          <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">Alamid</h1>
           <p className="text-slate-400 mb-8">نظام إدارة النقل السياحي المتكامل</p>
           <Button 
             disabled={isLoggingIn}
@@ -119,6 +120,8 @@ function AppContent() {
         return <MaintenanceList />;
       case 'fuel':
         return <FuelList />;
+      case 'expenses-management':
+        return <ExpensesManagement />;
       case 'accounting':
         return <Accounting />;
       case 'treasury':
@@ -148,8 +151,8 @@ function AppContent() {
   return (
     <div className="flex min-h-screen bg-slate-50 font-sans" dir="rtl">
       <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
-      <main className="flex-1 lg:mr-72 p-4 md:p-8 lg:p-12">
-        <div className="max-w-7xl mx-auto">
+      <main className="flex-1 lg:mr-72 p-6 md:p-10 lg:p-12 print:p-0 print:mr-0 min-h-screen">
+        <div className="max-w-7xl mx-auto print:max-w-none">
           {renderContent()}
         </div>
       </main>

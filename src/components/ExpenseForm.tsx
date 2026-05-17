@@ -213,7 +213,7 @@ export function ExpenseForm() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>نوع المصروف</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
+                    <Select onValueChange={field.onChange} value={field.value || ""}>
                       <FormControl>
                         <SelectTrigger className="rounded-xl h-11">
                           <SelectValue placeholder="اختر النوع" />
@@ -236,7 +236,7 @@ export function ExpenseForm() {
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>القسم الفرعي</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value}>
+                  <Select onValueChange={field.onChange} value={field.value || ""}>
                     <FormControl>
                       <SelectTrigger className="rounded-xl h-11">
                         <SelectValue placeholder="اختر القسم الفرعي" />
@@ -281,7 +281,7 @@ export function ExpenseForm() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>السيارة (اختياري)</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
+                      <Select onValueChange={field.onChange} value={field.value || ""}>
                         <FormControl>
                           <SelectTrigger className="rounded-xl h-11">
                             <SelectValue placeholder="اختر السيارة" />
@@ -304,7 +304,7 @@ export function ExpenseForm() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>السائق (اختياري)</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
+                      <Select onValueChange={field.onChange} value={field.value || ""}>
                         <FormControl>
                           <SelectTrigger className="rounded-xl h-11">
                             <SelectValue placeholder="اختر السائق" />
@@ -327,7 +327,7 @@ export function ExpenseForm() {
                   render={({ field }) => (
                     <FormItem className="md:col-span-2">
                       <FormLabel>المورد (اختياري)</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
+                      <Select onValueChange={field.onChange} value={field.value || ""}>
                         <FormControl>
                           <SelectTrigger className="rounded-xl h-11">
                             <SelectValue placeholder="اختر المورد" />
@@ -370,7 +370,7 @@ export function ExpenseForm() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>العملة</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
+                    <Select onValueChange={field.onChange} value={field.value || ""}>
                       <FormControl>
                         <SelectTrigger className="rounded-xl h-11">
                           <SelectValue placeholder="العملة" />
@@ -394,7 +394,7 @@ export function ExpenseForm() {
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>طريقة الدفع</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value}>
+                  <Select onValueChange={field.onChange} value={field.value || ""}>
                     <FormControl>
                       <SelectTrigger className="rounded-xl h-11">
                         <SelectValue placeholder="اختر الطريقة" />
@@ -419,7 +419,7 @@ export function ExpenseForm() {
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>الحساب المخصوم منه</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value}>
+                  <Select onValueChange={field.onChange} value={field.value || ""}>
                     <FormControl>
                       <SelectTrigger className="rounded-xl h-11">
                         <SelectValue placeholder="اختر الحساب" />

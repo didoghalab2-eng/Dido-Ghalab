@@ -26,9 +26,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { subscribeToCollection } from '@/lib/firestore';
-import { Invoice } from '@/types';
+import { subscribeToCollection, deleteDocument, updateDocument, queryDocuments, getDocuments } from '@/lib/firestore';
+import { Invoice, Booking, TaxRecord, Transaction, Account, Customer, Supplier } from '@/types';
 import { Badge } from '@/components/ui/badge';
+import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import { InvoiceForm } from './InvoiceForm';
@@ -38,17 +39,87 @@ import { useAuth } from '@/lib/AuthContext';
 export function InvoicesList() {
   const { settings } = useAuth();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+
+  const handleDeleteInvoice = async (invoice: Invoice) => {
+    if (!confirm('هل أنت متأكد من حذف هذه الفاتورة؟ سيتم إلغاء ربط الحجوزات المرتبطة بها.')) return;
+
+    try {
+      // 1. Unlink Bookings
+      if (invoice.bookingIds) {
+        for (const bookingId of invoice.bookingIds) {
+          await updateDocument('bookings', bookingId, {
+            invoiceId: null,
+            invoiceNumber: null
+          });
+        }
+      }
+
+      // 2. Delete Tax Records
+      const taxRecords = await queryDocuments<TaxRecord>('tax_records', 'invoiceId', '==', invoice.id);
+      if (taxRecords) {
+        for (const r of taxRecords) {
+          await deleteDocument('tax_records', r.id!);
+        }
+      }
+
+      // 3. Delete Posting Transaction and reverse balance
+      const transactions = await queryDocuments<Transaction>('transactions', 'referenceId', '==', invoice.id);
+      if (transactions) {
+        const posting = transactions.find(t => t.category === 'invoice_posting');
+        if (posting) {
+          const accounts = await getDocuments<Account>('accounts');
+          const account = accounts?.find(a => a.id === posting.accountId);
+          if (account) {
+            await updateDocument('accounts', account.id!, {
+              balance: account.balance - posting.amount
+            });
+          }
+          await deleteDocument('transactions', posting.id!);
+        }
+      }
+
+      // 4. Delete Invoice
+      await deleteDocument('invoices', invoice.id!);
+      toast.success('تم حذف الفاتورة وإلغاء الربط بنجاح');
+    } catch (error) {
+      console.error(error);
+      toast.error('حدث خطأ أثناء حذف الفاتورة');
+    }
+  };
 
   useEffect(() => {
     const unsubscribe = subscribeToCollection<Invoice>('invoices', (data) => {
       setInvoices(data);
       setLoading(false);
     });
-    return () => unsubscribe();
+    const unsubCustomers = subscribeToCollection<Customer>('customers', setCustomers);
+    const unsubSuppliers = subscribeToCollection<Supplier>('suppliers', setSuppliers);
+    return () => {
+      unsubscribe();
+      unsubCustomers();
+      unsubSuppliers();
+    };
   }, []);
+
+  const getTargetName = (invoice: Invoice) => {
+    if (invoice.targetName) return invoice.targetName;
+    if (invoice.targetType === 'customer') {
+      return customers.find(c => c.id === invoice.targetId)?.name || 'عميل غير معروف';
+    }
+    return suppliers.find(s => s.id === invoice.targetId)?.name || 'مورد غير معروف';
+  };
+
+  const filteredInvoices = invoices.filter(invoice => {
+    const targetName = getTargetName(invoice).toLowerCase();
+    const matchesSearch = invoice.number.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                         targetName.includes(searchTerm.toLowerCase());
+    return matchesSearch;
+  });
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -105,23 +176,34 @@ export function InvoicesList() {
                     جاري التحميل...
                   </TableCell>
                 </TableRow>
-              ) : invoices.length === 0 ? (
+              ) : filteredInvoices.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={6} className="h-32 text-center text-slate-500">
-                    لا توجد فواتير صادرة حالياً
+                    لا توجد فواتير تطابق البحث
                   </TableCell>
                 </TableRow>
               ) : (
-                invoices.map((invoice) => (
+                filteredInvoices.map((invoice) => (
                   <TableRow key={invoice.id} className="hover:bg-slate-50/50 transition-colors">
                     <TableCell className="font-bold text-blue-600">{invoice.number}</TableCell>
-                    <TableCell>{format(new Date(invoice.date), 'dd MMMM yyyy', { locale: ar })}</TableCell>
                     <TableCell>
-                      <Badge variant="secondary" className="font-normal">
-                        {invoice.targetType === 'customer' ? 'عميل' : 'مورد'}
-                      </Badge>
+                      {invoice.date ? (() => {
+                        try {
+                          return format(new Date(invoice.date), 'dd MMMM yyyy', { locale: ar });
+                        } catch (e) {
+                          return invoice.date;
+                        }
+                      })() : '---'}
                     </TableCell>
-                    <TableCell className="font-bold text-slate-900">{invoice.total.toLocaleString()} EGP</TableCell>
+                    <TableCell>
+                      <div className="flex flex-col">
+                        <span className="font-bold text-slate-900">{getTargetName(invoice)}</span>
+                        <Badge variant="secondary" className="font-normal w-fit text-[10px] h-4 px-1">
+                          {invoice.targetType === 'customer' ? 'عميل' : 'مورد'}
+                        </Badge>
+                      </div>
+                    </TableCell>
+                    <TableCell className="font-bold text-slate-900">{invoice.total.toLocaleString()} ج.م</TableCell>
                     <TableCell>{getStatusBadge(invoice.status)}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
@@ -140,11 +222,17 @@ export function InvoicesList() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end" className="w-40 rounded-xl">
-                            <DropdownMenuItem className="gap-2 cursor-pointer">
+                            <DropdownMenuItem 
+                              className="gap-2 cursor-pointer"
+                              onClick={() => setSelectedInvoice(invoice)}
+                            >
                               <FileText className="w-4 h-4" />
                               <span>عرض التفاصيل</span>
                             </DropdownMenuItem>
-                            <DropdownMenuItem className="gap-2 cursor-pointer text-red-600 focus:text-red-600 focus:bg-red-50">
+                            <DropdownMenuItem 
+                              className="gap-2 cursor-pointer text-red-600 focus:text-red-600 focus:bg-red-50"
+                              onClick={() => handleDeleteInvoice(invoice)}
+                            >
                               <Trash2 className="w-4 h-4" />
                               <span>حذف</span>
                             </DropdownMenuItem>

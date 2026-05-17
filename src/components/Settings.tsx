@@ -14,8 +14,8 @@ import {
 import { toast } from 'sonner';
 
 export function Settings() {
-  const [companyName, setCompanyName] = useState('Alamed');
-  const [email, setEmail] = useState('info@alamed.com');
+  const [companyName, setCompanyName] = useState('Alamid');
+  const [email, setEmail] = useState('info@alamid.com');
 
   const handleSave = () => {
     toast.success('تم حفظ الإعدادات بنجاح');

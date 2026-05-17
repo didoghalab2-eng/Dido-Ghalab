@@ -12,10 +12,17 @@ import {
   Search,
   Filter,
   Download,
-  Percent
+  Percent,
+  History
 } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { 
+  Tabs, 
+  TabsContent, 
+  TabsList, 
+  TabsTrigger 
+} from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import {
@@ -26,18 +33,22 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { subscribeToCollection } from '@/lib/firestore';
-import { Booking, Expense, TaxRecord } from '@/types';
+import { subscribeToCollection, createDocument, updateDocument } from '@/lib/firestore';
+import { Booking, Expense, TaxRecord, Vehicle, DepreciationEntry } from '@/types';
 import { format, startOfMonth, endOfMonth, isWithinInterval } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import { ExpenseForm } from './ExpenseForm';
+import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
 export function Accounting() {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [taxRecords, setTaxRecords] = useState<TaxRecord[]>([]);
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [depreciationEntries, setDepreciationEntries] = useState<DepreciationEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isProcessingDepreciation, setIsProcessingDepreciation] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [currentMonth, setCurrentMonth] = useState(new Date());
 
@@ -45,11 +56,15 @@ export function Accounting() {
     const unsubBookings = subscribeToCollection<Booking>('bookings', setBookings);
     const unsubExpenses = subscribeToCollection<Expense>('expenses', setExpenses);
     const unsubTax = subscribeToCollection<TaxRecord>('tax_records', setTaxRecords);
+    const unsubVehicles = subscribeToCollection<Vehicle>('vehicles', setVehicles);
+    const unsubDepr = subscribeToCollection<DepreciationEntry>('depreciation_entries', setDepreciationEntries);
     setLoading(false);
     return () => {
       unsubBookings();
       unsubExpenses();
       unsubTax();
+      unsubVehicles();
+      unsubDepr();
     };
   }, []);
 
@@ -63,6 +78,12 @@ export function Accounting() {
   const filteredExpenses = expenses.filter(e => 
     isWithinInterval(new Date(e.date), { start: monthStart, end: monthEnd })
   );
+
+  const monthDepreciation = depreciationEntries.filter(d => 
+    isWithinInterval(new Date(d.date), { start: monthStart, end: monthEnd })
+  );
+
+  const totalDepreciationExpense = monthDepreciation.reduce((sum, d) => sum + d.amount, 0);
 
   const totalRevenue = filteredBookings.reduce((acc, b) => acc + (b.customerPrice || 0) + ((b.visaPrice || 0) * (b.visaCount || 0)), 0);
   const totalCollected = filteredBookings.reduce((acc, b) => acc + (b.collectedAmount || 0), 0);
@@ -79,7 +100,7 @@ export function Accounting() {
     .filter(e => e.category === 'operating')
     .reduce((acc, e) => acc + e.amount, 0);
 
-  const totalExpenses = adminExpenses + otherOperatingExpenses + operatingCosts;
+  const totalExpenses = adminExpenses + otherOperatingExpenses + operatingCosts + totalDepreciationExpense;
   const netProfit = totalRevenue - totalExpenses;
   const pendingCollections = totalRevenue - totalCollected;
 
@@ -112,6 +133,55 @@ export function Accounting() {
       other_op: 'مصروفات تشغيل أخرى'
     };
     return labels[sub] || sub;
+  };
+
+  const handleProcessDepreciation = async (vehicle: Vehicle) => {
+    if (!vehicle.purchasePrice || vehicle.purchasePrice === 0) {
+      toast.error(`الرجاء إعداد سعر الشراء للسيارة ${vehicle.plateNumber}`);
+      return;
+    }
+
+    const startKm = vehicle.lastDepreciationKm || vehicle.depreciationStartKm || 0;
+    const endKm = vehicle.currentKm || 0;
+    const kmDriven = endKm - startKm;
+
+    if (kmDriven <= 0) {
+      toast.error(`لا يوجد أميال جديدة مسجلة للإهلاك للسيارة ${vehicle.plateNumber}`);
+      return;
+    }
+
+    const salvageValue = vehicle.salvageValue || 0;
+    const estimatedLife = vehicle.estimatedTotalKm || 300000;
+    const ratePerKm = (vehicle.purchasePrice - salvageValue) / estimatedLife;
+    const amount = kmDriven * ratePerKm;
+
+    try {
+      setIsProcessingDepreciation(true);
+      
+      const deprId = await createDocument('depreciation_entries', {
+        vehicleId: vehicle.id!,
+        vehiclePlate: vehicle.plateNumber,
+        date: new Date().toISOString(),
+        periodStartKm: startKm,
+        periodEndKm: endKm,
+        kmDriven,
+        amount,
+        depreciationRatePerKm: ratePerKm,
+        createdAt: new Date().toISOString(),
+      });
+
+      // Update vehicle's last depreciation KM
+      await updateDocument('vehicles', vehicle.id!, {
+        lastDepreciationKm: endKm
+      });
+
+      toast.success(`تم تسجيل إهلاك بقيمة ${amount.toFixed(2)} للسيارة ${vehicle.plateNumber}`);
+    } catch (error) {
+      console.error(error);
+      toast.error('حدث خطأ أثناء معالجة الإهلاك');
+    } finally {
+      setIsProcessingDepreciation(false);
+    }
   };
 
   return (
@@ -201,8 +271,21 @@ export function Accounting() {
               </div>
               <Badge className="bg-white/20 text-white border-none">الصافي</Badge>
             </div>
-            <p className="text-emerald-100 text-sm font-medium">صافي الربح التقديري</p>
+            <p className="text-emerald-100 text-sm font-medium">صافي الربح بعد الإهلاك</p>
             <h3 className="text-2xl font-bold mt-1">{netProfit.toLocaleString()} <span className="text-sm font-normal">EGP</span></h3>
+          </CardContent>
+        </Card>
+
+        <Card className="border-none shadow-sm bg-indigo-600 text-white">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="p-2 bg-white/20 rounded-xl">
+                <TrendingDown className="w-6 h-6" />
+              </div>
+              <Badge className="bg-white/20 text-white border-none">إهلاك الأصول</Badge>
+            </div>
+            <p className="text-indigo-100 text-sm font-medium">إجمالي الإهلاك لهذا الشهر</p>
+            <h3 className="text-2xl font-bold mt-1">{totalDepreciationExpense.toLocaleString()} <span className="text-sm font-normal">EGP</span></h3>
           </CardContent>
         </Card>
 
@@ -223,8 +306,15 @@ export function Accounting() {
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <Card className="lg:col-span-2 border-none shadow-sm bg-white overflow-hidden">
+      <Tabs defaultValue="management" className="space-y-6">
+        <TabsList className="bg-white p-1 rounded-2xl border border-slate-200 h-14 shadow-sm w-full md:w-fit">
+          <TabsTrigger value="management" className="rounded-xl px-8 h-full font-bold">ملخص الحسابات</TabsTrigger>
+          <TabsTrigger value="depreciation" className="rounded-xl px-8 h-full font-bold">إهلاك الأصول</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="management" className="space-y-8 outline-none">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <Card className="lg:col-span-2 border-none shadow-sm bg-white overflow-hidden">
           <CardHeader className="p-6 border-b border-slate-100 flex flex-row items-center justify-between">
             <CardTitle className="text-lg font-bold flex items-center gap-2">
               <DollarSign className="w-5 h-5 text-rose-500" />
@@ -374,61 +464,120 @@ export function Accounting() {
         </div>
       </div>
 
-      <Card className="border-none shadow-sm bg-white overflow-hidden">
-        <CardHeader className="p-6 border-b border-slate-100">
-          <CardTitle className="text-lg font-bold flex items-center gap-2">
-            <Percent className="w-5 h-5 text-blue-600" />
-            كشف حساب ضريبة المبيعات (دائن ومدين)
-          </CardTitle>
-        </CardHeader>
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader className="bg-slate-50/50">
-              <TableRow>
-                <TableHead className="text-right">التاريخ</TableHead>
-                <TableHead className="text-right">البيان</TableHead>
-                <TableHead className="text-right">رقم الفاتورة</TableHead>
-                <TableHead className="text-right text-emerald-600">دائن (محصل)</TableHead>
-                <TableHead className="text-right text-rose-600">مدين (مدفوع)</TableHead>
-                <TableHead className="text-left">الرصيد</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredTax.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="h-32 text-center text-slate-400">لا توجد سجلات ضريبية لهذا الشهر</TableCell>
-                </TableRow>
-              ) : (
-                (() => {
-                  let runningBalance = 0;
-                  return filteredTax.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()).map((record) => {
-                    const credit = record.type === 'vat_collected' ? record.amount : 0;
-                    const debit = record.type === 'vat_paid' ? record.amount : 0;
-                    runningBalance += (credit - debit);
-                    
+        </TabsContent>
+
+        <TabsContent value="depreciation" className="space-y-8 outline-none">
+          <Card className="rounded-3xl border-none shadow-sm bg-white overflow-hidden">
+            <CardHeader className="p-8 border-b border-slate-50 bg-slate-50/10">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-2xl font-black text-slate-900">نظام إهلاك الأصول (وحدات الإنتاج)</CardTitle>
+                  <CardDescription className="text-slate-500 font-medium">حساب إهلاك السيارات بناءً على عدد الكيلومترات المقطوعة</CardDescription>
+                </div>
+                <div className="p-3 bg-blue-50 rounded-2xl">
+                  <TrendingDown className="w-8 h-8 text-blue-600" />
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader className="bg-slate-50/50">
+                  <TableRow>
+                    <TableHead className="text-right">السيارة</TableHead>
+                    <TableHead className="text-right">التكلفة / الخردة</TableHead>
+                    <TableHead className="text-right">معدل الإهلاك / كم</TableHead>
+                    <TableHead className="text-right">آخر عداد مهلك</TableHead>
+                    <TableHead className="text-right">العداد الحالي</TableHead>
+                    <TableHead className="text-right">المسافة المعلقة</TableHead>
+                    <TableHead className="text-left">الإجراء</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {vehicles.filter(v => v.owner === 'company').map((v) => {
+                    const rate = (v.purchasePrice! - (v.salvageValue || 0)) / (v.estimatedTotalKm || 300000);
+                    const lastKm = v.lastDepreciationKm || v.depreciationStartKm || 0;
+                    const pendingKm = Math.max(0, (v.currentKm || 0) - lastKm);
+                    const pendingAmount = pendingKm * rate;
+
                     return (
-                      <TableRow key={record.id} className="hover:bg-slate-50/50 transition-colors">
-                        <TableCell className="text-sm">{format(new Date(record.date), 'dd/MM/yyyy')}</TableCell>
-                        <TableCell className="text-sm">{record.description}</TableCell>
-                        <TableCell className="text-sm font-medium text-blue-600">{record.invoiceNumber || '---'}</TableCell>
-                        <TableCell className="text-right text-emerald-600 font-medium">
-                          {credit > 0 ? credit.toLocaleString() : '-'}
+                      <TableRow key={v.id} className="hover:bg-slate-50/50">
+                        <TableCell className="font-bold">{v.plateNumber} ({v.model})</TableCell>
+                        <TableCell>
+                          <div className="flex flex-col">
+                            <span>{v.purchasePrice?.toLocaleString()}</span>
+                            <span className="text-[10px] text-slate-400">الخردة: {v.salvageValue?.toLocaleString()}</span>
+                          </div>
                         </TableCell>
-                        <TableCell className="text-right text-rose-600 font-medium">
-                          {debit > 0 ? debit.toLocaleString() : '-'}
+                        <TableCell className="font-mono text-emerald-600 font-bold">{rate.toFixed(4)}</TableCell>
+                        <TableCell className="text-slate-500">{lastKm.toLocaleString()} كم</TableCell>
+                        <TableCell className="font-bold">{v.currentKm?.toLocaleString()} كم</TableCell>
+                        <TableCell>
+                          <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100 border-none">
+                            {pendingKm.toLocaleString()} كم
+                          </Badge>
                         </TableCell>
-                        <TableCell className="text-left font-bold">
-                          {runningBalance.toLocaleString()} EGP
+                        <TableCell className="text-left">
+                          <Button 
+                            size="sm" 
+                            className="bg-slate-900 hover:bg-slate-800 text-white rounded-lg h-9 px-4 gap-2"
+                            disabled={pendingKm <= 0 || isProcessingDepreciation}
+                            onClick={() => handleProcessDepreciation(v)}
+                          >
+                            ترحيل إهلاك ({pendingAmount.toFixed(0)})
+                          </Button>
                         </TableCell>
                       </TableRow>
                     );
-                  });
-                })()
-              )}
-            </TableBody>
-          </Table>
-        </div>
-      </Card>
+                  })}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-3xl border-none shadow-sm bg-white overflow-hidden">
+            <CardHeader className="p-8 border-b border-slate-50">
+              <CardTitle className="text-xl font-bold flex items-center gap-2">
+                <History className="w-5 h-5 text-slate-400" />
+                سجل قيود الإهلاك المسجلة
+              </CardTitle>
+            </CardHeader>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader className="bg-slate-50/50">
+                  <TableRow>
+                    <TableHead className="text-right">التاريخ</TableHead>
+                    <TableHead className="text-right">السيارة</TableHead>
+                    <TableHead className="text-right">الفترة (من - إلى)</TableHead>
+                    <TableHead className="text-right">المسافة</TableHead>
+                    <TableHead className="text-right">المعدل</TableHead>
+                    <TableHead className="text-left font-bold text-rose-600">القيمة</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {depreciationEntries.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="h-32 text-center text-slate-400">لا توجد قيود إهلاك مسجلة</TableCell>
+                    </TableRow>
+                  ) : (
+                    depreciationEntries
+                      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                      .map(entry => (
+                        <TableRow key={entry.id} className="hover:bg-slate-50/50">
+                          <TableCell className="text-xs">{format(new Date(entry.date), 'dd/MM/yyyy')}</TableCell>
+                          <TableCell className="font-bold">{entry.vehiclePlate}</TableCell>
+                          <TableCell className="text-xs text-slate-500">{entry.periodStartKm.toLocaleString()} - {entry.periodEndKm.toLocaleString()}</TableCell>
+                          <TableCell className="font-medium">{entry.kmDriven.toLocaleString()} كم</TableCell>
+                          <TableCell className="text-[10px] font-mono">{entry.depreciationRatePerKm.toFixed(4)}</TableCell>
+                          <TableCell className="text-left font-black text-rose-600">{entry.amount.toLocaleString()} ج.م</TableCell>
+                        </TableRow>
+                      ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

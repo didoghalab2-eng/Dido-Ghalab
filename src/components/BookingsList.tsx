@@ -31,19 +31,46 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from '@/components/ui/badge';
-import { subscribeToCollection, deleteDocument, updateDocument } from '@/lib/firestore';
+import { subscribeToCollection, deleteDocument, updateDocument, queryDocuments } from '@/lib/firestore';
 import { Booking } from '@/types';
 import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import { BookingForm } from './BookingForm';
 import { CollectionForm } from './CollectionForm';
+import { PrintVoucher } from './PrintVoucher';
 import { toast } from 'sonner';
 import { TRIP_TYPES } from '@/constants/hotels';
+import { useAuth } from '@/lib/AuthContext';
 
 export function BookingsList() {
+  const { settings } = useAuth();
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [printBooking, setPrintBooking] = useState<Booking | null>(null);
+  const [editingBooking, setEditingBooking] = useState<Booking | null>(null);
+  const [isBookingFormOpen, setIsBookingFormOpen] = useState(false);
+  const [isPrintPreviewOpen, setIsPrintPreviewOpen] = useState(false);
+  const [collectingBooking, setCollectingBooking] = useState<Booking | null>(null);
+  const [isCollectionFormOpen, setIsCollectionFormOpen] = useState(false);
+  const [deletingBooking, setDeletingBooking] = useState<Booking | null>(null);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
 
   useEffect(() => {
     const unsubscribe = subscribeToCollection('bookings', (data) => {
@@ -53,9 +80,9 @@ export function BookingsList() {
   }, []);
 
   const filteredBookings = bookings.filter(b => 
-    b.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    b.carNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    b.city.toLowerCase().includes(searchTerm.toLowerCase())
+    (b.customerName?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+    (b.carNumber?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+    (b.city?.toLowerCase() || '').includes(searchTerm.toLowerCase())
   );
 
   const getStatusBadge = (status: string) => {
@@ -85,18 +112,66 @@ export function BookingsList() {
   };
 
   const handlePrint = (booking: Booking) => {
-    window.print();
+    setPrintBooking(booking);
+    setIsPrintPreviewOpen(true);
+  };
+
+  const handleDeleteBooking = async () => {
+    if (!deletingBooking?.id) return;
+    
+    try {
+      // 1. Find and delete associated transactions
+      const associatedTransactions = await queryDocuments<any>('transactions', 'referenceId', '==', deletingBooking.id);
+      if (associatedTransactions && associatedTransactions.length > 0) {
+        for (const tx of associatedTransactions) {
+          if (tx.id) {
+            await deleteDocument('transactions', tx.id);
+          }
+        }
+      }
+
+      // 2. Delete the booking itself
+      await deleteDocument('bookings', deletingBooking.id);
+      
+      toast.success('تم حذف الحجز وجميع معاملاته المالية بنجاح');
+      setIsDeleteDialogOpen(false);
+      setDeletingBooking(null);
+    } catch (error: any) {
+      console.error('Delete Booking Error:', error);
+      let errorMsg = 'حدث خطأ أثناء حذف الحجز';
+      try {
+        const parsed = JSON.parse(error.message);
+        if (parsed.error?.toLowerCase().includes('permission')) {
+          errorMsg = 'فشل الحذف: ليست لديك صلاحية كافية. يرجى التأكد من تسجيل الدخول كمسؤول.';
+        } else {
+          errorMsg = `خطأ: ${parsed.error}`;
+        }
+      } catch (e) {
+        if (error.message) errorMsg = error.message;
+      }
+      toast.error(errorMsg);
+    }
   };
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+      <div className="no-print space-y-6">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
         <div>
           <h2 className="text-3xl font-bold text-slate-900 tracking-tight">الحجوزات</h2>
           <p className="text-slate-500 mt-1">إدارة وتنظيم جميع رحلات النقل السياحي والعملاء</p>
         </div>
         <div className="flex items-center gap-3">
-          <BookingForm />
+          <Button 
+            onClick={() => {
+              setEditingBooking(null);
+              setIsBookingFormOpen(true);
+            }}
+            className="bg-blue-600 hover:bg-blue-700 text-white gap-2 h-11 px-6 rounded-xl shadow-lg shadow-blue-600/20"
+          >
+            <Plus className="w-5 h-5" />
+            <span>حجز جديد</span>
+          </Button>
         </div>
       </div>
 
@@ -160,7 +235,15 @@ export function BookingsList() {
                     <TableCell>
                       <div className="flex flex-col">
                         <span className="font-semibold text-slate-900">{booking.customerName}</span>
-                        <span className="text-xs text-slate-400">{booking.paxCount} أفراد - {booking.flightNumber}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-slate-400">{booking.paxCount} أفراد - {booking.flightNumber}</span>
+                          {booking.invoiceNumber && (
+                            <Badge variant="outline" className="text-[10px] h-4 px-1 bg-blue-50 text-blue-600 border-blue-200">
+                              <FileText className="w-2.5 h-2.5 mr-0.5" />
+                              {booking.invoiceNumber}
+                            </Badge>
+                          )}
+                        </div>
                       </div>
                     </TableCell>
                     <TableCell>
@@ -192,15 +275,22 @@ export function BookingsList() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-48">
-                          <CollectionForm 
-                            booking={booking} 
-                            trigger={
-                              <DropdownMenuItem className="gap-2" onSelect={(e) => e.preventDefault()}>
-                                <DollarSign className="w-4 h-4" /> تحصيل مبلغ
-                              </DropdownMenuItem>
-                            }
-                          />
-                          <DropdownMenuItem className="gap-2">
+                          <DropdownMenuItem 
+                            className="gap-2" 
+                            onClick={() => {
+                              setCollectingBooking(booking);
+                              setIsCollectionFormOpen(true);
+                            }}
+                          >
+                            <DollarSign className="w-4 h-4" /> تحصيل مبلغ
+                          </DropdownMenuItem>
+                          <DropdownMenuItem 
+                            className="gap-2" 
+                            onClick={() => {
+                              setEditingBooking(booking);
+                              setIsBookingFormOpen(true);
+                            }}
+                          >
                             <Edit2 className="w-4 h-4" /> تعديل
                           </DropdownMenuItem>
                           <DropdownMenuItem 
@@ -218,9 +308,8 @@ export function BookingsList() {
                           <DropdownMenuItem 
                             className="gap-2 text-red-600 focus:text-red-600"
                             onClick={() => {
-                              if (booking.id && confirm('هل أنت متأكد من حذف هذا الحجز نهائياً؟')) {
-                                deleteDocument('bookings', booking.id);
-                              }
+                              setDeletingBooking(booking);
+                              setIsDeleteDialogOpen(true);
                             }}
                           >
                             <Trash2 className="w-4 h-4" /> حذف نهائي
@@ -235,6 +324,70 @@ export function BookingsList() {
           </Table>
         </div>
       </div>
+      </div>
+      {printBooking && (
+        <PrintVoucher booking={printBooking} companyName={settings?.companyName} />
+      )}
+      
+      {isBookingFormOpen && (
+        <BookingForm 
+          booking={editingBooking || undefined} 
+          open={isBookingFormOpen} 
+          onOpenChange={(open) => {
+            setIsBookingFormOpen(open);
+            if (!open) setEditingBooking(null);
+          }} 
+        />
+      )}
+
+      <Dialog open={isPrintPreviewOpen} onOpenChange={setIsPrintPreviewOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader className="no-print">
+            <DialogTitle className="flex items-center justify-between">
+              <span>معاينة الطباعة</span>
+              <Button onClick={() => window.print()} className="gap-2">
+                <Printer className="w-4 h-4" /> طباعة
+              </Button>
+            </DialogTitle>
+          </DialogHeader>
+          {printBooking && (
+            <PrintVoucher booking={printBooking} companyName={settings?.companyName} />
+          )}
+        </DialogContent>
+      </Dialog>
+      
+      {isCollectionFormOpen && collectingBooking && (
+        <CollectionForm 
+          booking={collectingBooking} 
+          open={isCollectionFormOpen} 
+          onOpenChange={setIsCollectionFormOpen} 
+        />
+      )}
+
+      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <AlertDialogContent className="rounded-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-xl font-bold text-red-600">تأكيد الحذف النهائي</AlertDialogTitle>
+            <AlertDialogDescription className="text-slate-500">
+              هل أنت متأكد تماماً من حذف هذا الحجز؟
+              <br />
+              <strong className="text-slate-900 mt-2 block">تحذير:</strong> سيتم حذف الحجز وجميع القيود المالية والمعاملات المرتبطة به في شبكة الحسابات نهائياً ولا يمكن التراجع عن هذه الخطوة.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2">
+            <AlertDialogCancel variant="outline" size="default" className="rounded-xl">إلغاء</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={(e) => {
+                e.preventDefault();
+                handleDeleteBooking();
+              }}
+              className="bg-red-600 hover:bg-red-700 text-white rounded-xl"
+            >
+              تأكيد الحذف النهائي
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

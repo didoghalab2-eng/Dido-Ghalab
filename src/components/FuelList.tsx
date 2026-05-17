@@ -39,6 +39,8 @@ import { BarChart3, List } from 'lucide-react';
 export function FuelList() {
   const [fuelRecords, setFuelRecords] = useState<Fuel[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [editingRecord, setEditingRecord] = useState<Fuel | null>(null);
+  const [isFormOpen, setIsFormOpen] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -165,19 +167,25 @@ export function FuelList() {
                                 <MoreVertical className="w-4 h-4 text-slate-500" />
                               </Button>
                             </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-40 rounded-xl">
-                              <DropdownMenuItem className="gap-2 cursor-pointer">
-                                <Edit className="w-4 h-4" />
-                                <span>تعديل</span>
-                              </DropdownMenuItem>
-                              <DropdownMenuItem 
-                                className="gap-2 cursor-pointer text-red-600 focus:text-red-600 focus:bg-red-50"
-                                onClick={() => record.id && handleDelete(record.id)}
-                              >
-                                <Trash2 className="w-4 h-4" />
-                                <span>حذف</span>
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
+                          <DropdownMenuContent align="end" className="w-40 rounded-xl">
+                            <DropdownMenuItem 
+                              className="gap-2 cursor-pointer" 
+                              onClick={() => {
+                                setEditingRecord(record);
+                                setIsFormOpen(true);
+                              }}
+                            >
+                              <Edit className="w-4 h-4" />
+                              <span>تعديل</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem 
+                              className="gap-2 cursor-pointer text-red-600 focus:text-red-600 focus:bg-red-50"
+                              onClick={() => record.id && handleDelete(record.id)}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                              <span>حذف</span>
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
                           </DropdownMenu>
                         </TableCell>
                       </TableRow>
@@ -193,6 +201,17 @@ export function FuelList() {
           <FuelAnalysis />
         </TabsContent>
       </Tabs>
+      
+      {isFormOpen && (
+        <FuelForm 
+          fuel={editingRecord || undefined} 
+          open={isFormOpen} 
+          onOpenChange={(open) => {
+            setIsFormOpen(open);
+            if (!open) setEditingRecord(null);
+          }} 
+        />
+      )}
     </div>
   );
 }

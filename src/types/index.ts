@@ -46,6 +46,7 @@ export interface Booking {
   customerPrice: number;
   collectedAmount?: number;
   collectedCurrency?: Currency;
+  collectionAccountId?: string;
   visaPrice?: number;
   visaCurrency?: Currency;
   visaCount?: number;
@@ -62,6 +63,10 @@ export interface Booking {
   totalNet: number;
   permitType?: 'none' | 'customer' | 'company';
   permitCost?: number;
+  permitAccountId?: string;
+  invoiceId?: string;
+  invoiceNumber?: string;
+  estimatedHours?: number;
   createdAt: string;
   createdBy: string;
 }
@@ -71,6 +76,7 @@ export interface Supplier {
   name: string;
   phone: string;
   email: string;
+  type: 'service' | 'trade'; // service: for trips/cars, trade: for assets/goods
 }
 
 export interface Driver {
@@ -80,6 +86,7 @@ export interface Driver {
   carNumber: string;
   carType: VehicleType;
   pettyCash: number;
+  monthlySalary?: number;
   insuranceCost?: number;
   insuranceExpiry?: string;
 }
@@ -105,6 +112,13 @@ export interface Vehicle {
   tireChangeIntervalKm?: number;
   lastMaintenanceKm?: number;
   maintenanceIntervalKm?: number;
+  // Asset & Depreciation
+  purchasePrice?: number;
+  salvageValue?: number;
+  estimatedTotalKm?: number;
+  purchaseDate?: string;
+  depreciationStartKm?: number;
+  lastDepreciationKm?: number;
 }
 
 export interface Customer {
@@ -126,11 +140,13 @@ export interface Invoice {
   dueDate: string;
   targetId: string; // customerId or supplierId
   targetType: 'customer' | 'supplier';
+  targetName?: string;
   items: {
     description: string;
     amount: number;
     quantity: number;
     total: number;
+    bookingId?: string;
   }[];
   subtotal: number;
   tax: number; // Legacy, keeping for compatibility
@@ -141,6 +157,7 @@ export interface Invoice {
   withholdingTaxAmount: number;
   total: number;
   status: 'draft' | 'sent' | 'paid' | 'overdue';
+  bookingIds?: string[];
   notes?: string;
 }
 
@@ -152,6 +169,8 @@ export interface PriceList {
   prices: {
     operationType: OperationType;
     region?: string;
+    from?: string;
+    to?: string;
     route?: string;
     vehicleType: VehicleType;
     price: number;
@@ -161,11 +180,13 @@ export interface PriceList {
 
 export interface Maintenance {
   id?: string;
+  vehicleId?: string;
   carNumber: string;
   date: string;
   type: string;
   cost: number;
   paymentMethod: string;
+  accountId?: string;
   faultType: string;
   location: 'agency' | 'workshop';
   kilometers: number;
@@ -178,6 +199,7 @@ export interface Fuel {
   date: string;
   liters: number;
   cost: number;
+  accountId?: string;
   kilometers: number;
 }
 
@@ -187,7 +209,49 @@ export type ExpenseSubCategory =
   | 'petty_cash' | 'tips' | 'maintenance' | 'supplier_payment' | 'fuel' | 'other_op'
   | 'driver_insurance' | 'tourism_chamber' | 'license_renewal'
   | 'vehicle_insurance_routine' | 'vehicle_insurance_external'
-  | 'sales_tax_payment' | 'withholding_tax';
+  | 'sales_tax_payment' | 'withholding_tax' | 'purchase';
+
+export interface PurchaseItem {
+  description: string;
+  amount: number;
+  quantity: number;
+  total: number;
+}
+
+export interface Purchase {
+  id?: string;
+  number: string;
+  date: string;
+  supplierId?: string;
+  supplierName?: string;
+  supplierTaxId?: string;
+  items: PurchaseItem[];
+  subtotal: number;
+  isTaxInvoice: boolean;
+  vatRate: number;
+  vatAmount: number;
+  total: number;
+  paymentMethod: PaymentMethod;
+  isInstallment?: boolean;
+  installmentType?: 'bank' | 'dealer';
+  downPayment?: number;
+  installmentCount?: number;
+  installmentSystem?: string;
+  monthlyPayment?: number;
+  bankName?: string;
+  dealerName?: string;
+  accountId?: string;
+  status: 'draft' | 'completed' | 'cancelled';
+  notes?: string;
+  createdAt: string;
+  createdBy: string;
+}
+
+export interface Shareholder {
+  id: string;
+  name: string;
+  sharePercentage: number;
+}
 
 export interface Expense {
   id?: string;
@@ -206,7 +270,20 @@ export interface Expense {
   createdAt: string;
 }
 
-export type AccountType = 'safe' | 'bank';
+export interface DepreciationEntry {
+  id?: string;
+  vehicleId: string;
+  vehiclePlate: string;
+  date: string;
+  periodStartKm: number;
+  periodEndKm: number;
+  kmDriven: number;
+  amount: number;
+  depreciationRatePerKm: number;
+  createdAt: string;
+}
+
+export type AccountType = 'safe' | 'bank' | 'ledger' | 'contra_asset';
 
 export interface Account {
   id?: string;
@@ -233,8 +310,10 @@ export interface Transaction {
     number: string;
     dueDate: string;
   };
-  accountId: string; // From account
+  accountId: string; // From/To account (for single entry types)
   toAccountId?: string; // For transfers
+  sourceType?: 'collection' | 'customer' | 'supplier' | 'driver' | 'shareholder' | 'other_account';
+  sourceId?: string; // bookingId, customerId, supplierId, driverId, shareholderId or other accountId
   category: string; // e.g., 'booking_collection', 'operating_expense', etc.
   referenceId?: string; // bookingId, expenseId, etc.
   description: string;

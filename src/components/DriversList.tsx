@@ -34,6 +34,8 @@ import { Badge } from '@/components/ui/badge';
 export function DriversList() {
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [editingDriver, setEditingDriver] = useState<Driver | null>(null);
+  const [isFormOpen, setIsFormOpen] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -158,7 +160,13 @@ export function DriversList() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-40 rounded-xl">
-                          <DropdownMenuItem className="gap-2 cursor-pointer">
+                          <DropdownMenuItem 
+                            className="gap-2 cursor-pointer" 
+                            onClick={() => {
+                              setEditingDriver(driver);
+                              setIsFormOpen(true);
+                            }}
+                          >
                             <Edit className="w-4 h-4" />
                             <span>تعديل</span>
                           </DropdownMenuItem>
@@ -179,6 +187,17 @@ export function DriversList() {
           </Table>
         </div>
       </div>
+      
+      {isFormOpen && (
+        <DriverForm 
+          driver={editingDriver || undefined} 
+          open={isFormOpen} 
+          onOpenChange={(open) => {
+            setIsFormOpen(open);
+            if (!open) setEditingDriver(null);
+          }} 
+        />
+      )}
     </div>
   );
 }

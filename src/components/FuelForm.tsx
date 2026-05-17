@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -27,7 +27,8 @@ import { format } from 'date-fns';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
-import { Vehicle } from '@/types';
+import { Fuel, Vehicle, Account } from '@/types';
+import { useAuth } from '@/lib/AuthContext';
 import {
   Select,
   SelectContent,
@@ -42,39 +43,120 @@ const formSchema = z.object({
   date: z.date(),
   liters: z.coerce.number().min(0.1, 'الكمية مطلوبة'),
   cost: z.coerce.number().min(0.1, 'التكلفة مطلوبة'),
+  accountId: z.string().min(1, 'الحساب مطلوب'),
   kilometers: z.coerce.number().min(0),
 });
 
-export function FuelForm() {
-  const [open, setOpen] = useState(false);
+interface FuelFormProps {
+  fuel?: Fuel;
+  trigger?: React.ReactNode;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}
+
+export function FuelForm({ fuel, trigger, open: controlledOpen, onOpenChange: setControlledOpen }: FuelFormProps) {
+  const { user } = useAuth();
+  const [internalOpen, setInternalOpen] = useState(false);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
 
   useEffect(() => {
-    const unsub = subscribeToCollection<Vehicle>('vehicles', setVehicles);
-    return () => unsub();
+    const unsubVehicles = subscribeToCollection<Vehicle>('vehicles', setVehicles);
+    const unsubAccounts = subscribeToCollection<Account>('accounts', setAccounts);
+    return () => {
+      unsubVehicles();
+      unsubAccounts();
+    };
   }, []);
+  
+  const open = controlledOpen !== undefined ? controlledOpen : internalOpen;
+  const setOpen = setControlledOpen !== undefined ? setControlledOpen : setInternalOpen;
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      vehicleId: '',
-      carNumber: '',
-      date: new Date(),
-      liters: 0,
-      cost: 0,
-      kilometers: 0,
+      vehicleId: fuel?.vehicleId || '',
+      carNumber: fuel?.carNumber || '',
+      date: fuel?.date ? new Date(fuel.date) : new Date(),
+      liters: fuel?.liters || 0,
+      cost: fuel?.cost || 0,
+      accountId: fuel?.accountId || '',
+      kilometers: fuel?.kilometers || 0,
     },
   });
+
+  useEffect(() => {
+    if (open) {
+      form.reset({
+        vehicleId: fuel?.vehicleId || '',
+        carNumber: fuel?.carNumber || '',
+        date: fuel?.date ? new Date(fuel.date) : new Date(),
+        liters: fuel?.liters || 0,
+        cost: fuel?.cost || 0,
+        accountId: fuel?.accountId || '',
+        kilometers: fuel?.kilometers || 0,
+      });
+    }
+  }, [fuel, open, form]);
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
     try {
       const selectedVehicle = vehicles.find(v => v.id === values.vehicleId);
+      const selectedAccount = accounts.find(a => a.id === values.accountId);
       
-      await createDocument('fuel', {
-        ...values,
-        carNumber: selectedVehicle?.plateNumber || values.carNumber,
-        date: values.date.toISOString(),
-      });
+      if (fuel?.id) {
+        await updateDocument('fuel', fuel.id, {
+          ...values,
+          carNumber: selectedVehicle?.plateNumber || values.carNumber,
+          date: values.date.toISOString(),
+        });
+        toast.success('تم تحديث سجل الوقود بنجاح');
+      } else {
+        const fuelId = await createDocument('fuel', {
+          ...values,
+          carNumber: selectedVehicle?.plateNumber || values.carNumber,
+          date: values.date.toISOString(),
+        });
+
+        // Post to Accounting (Expense)
+        if (values.cost > 0 && selectedAccount) {
+          const expenseId = await createDocument('expenses', {
+            date: values.date.toISOString(),
+            category: 'operating',
+            subCategory: 'fuel',
+            amount: values.cost,
+            currency: selectedAccount.currency,
+            description: `وقود سيارة ${selectedVehicle?.plateNumber || values.carNumber} - ${values.liters} لتر`,
+            paymentMethod: 'cash', // Default for fuel usually, or use a field
+            accountId: values.accountId,
+            vehicleId: values.vehicleId,
+            referenceId: fuelId,
+            createdAt: new Date().toISOString(),
+          });
+
+          // Post to Treasury (Transaction)
+          await createDocument('transactions', {
+            date: values.date.toISOString(),
+            type: 'expense',
+            amount: values.cost,
+            currency: selectedAccount.currency,
+            paymentMethod: 'cash',
+            accountId: values.accountId,
+            category: 'fuel',
+            referenceId: expenseId,
+            description: `وقود سيارة ${selectedVehicle?.plateNumber || values.carNumber} - ${values.liters} لتر`,
+            createdAt: new Date().toISOString(),
+            createdBy: user?.uid || '',
+          });
+
+          // Update Account Balance
+          await updateDocument('accounts', selectedAccount.id!, {
+            balance: selectedAccount.balance - values.cost
+          });
+        }
+
+        toast.success('تم إضافة سجل الوقود وترحيله للحسابات بنجاح');
+      }
 
       // Update vehicle's current kilometers
       if (selectedVehicle && values.kilometers > (selectedVehicle.currentKm || 0)) {
@@ -83,21 +165,23 @@ export function FuelForm() {
         });
       }
 
-      toast.success('تم إضافة سجل الوقود بنجاح');
       setOpen(false);
       form.reset();
     } catch (error) {
-      toast.error('حدث خطأ أثناء إضافة سجل الوقود');
+      console.error(error);
+      toast.error(fuel ? 'حدث خطأ أثناء تحديث سجل الوقود' : 'حدث خطأ أثناء إضافة سجل الوقود');
     }
   }
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button className="bg-blue-600 hover:bg-blue-700 text-white gap-2 h-11 px-6 rounded-xl shadow-lg shadow-blue-600/20">
-          <Plus className="w-5 h-5" />
-          <span>وقود جديد</span>
-        </Button>
+      <DialogTrigger asChild nativeButton={!trigger}>
+        {trigger || (
+          <Button className="bg-blue-600 hover:bg-blue-700 text-white gap-2 h-11 px-6 rounded-xl shadow-lg shadow-blue-600/20">
+            <Plus className="w-5 h-5" />
+            <span>وقود جديد</span>
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
@@ -112,7 +196,7 @@ export function FuelForm() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>السيارة</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
+                    <Select onValueChange={field.onChange} value={field.value || ""}>
                       <FormControl>
                         <SelectTrigger className="rounded-xl h-11">
                           <SelectValue placeholder="اختر السيارة" />
@@ -191,6 +275,28 @@ export function FuelForm() {
                     <FormControl>
                       <Input type="number" step="0.01" {...field} />
                     </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="accountId"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>الحساب المالي</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value || ""}>
+                      <FormControl>
+                        <SelectTrigger className="rounded-xl h-11">
+                          <SelectValue placeholder="اختر الحساب" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {accounts.map(a => (
+                          <SelectItem key={a.id} value={a.id!}>{a.name} ({a.currency})</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <FormMessage />
                   </FormItem>
                 )}

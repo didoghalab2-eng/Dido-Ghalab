@@ -16,7 +16,7 @@ function DialogTrigger({
   return (
     <DialogPrimitive.Trigger
       data-slot="dialog-trigger"
-      {...(asChild ? { render: props.children as React.ReactElement } : props)}
+      {...(asChild ? { render: props.children as React.ReactElement, ...props } : props)}
     />
   )
 }

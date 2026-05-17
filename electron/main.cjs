@@ -65,7 +65,7 @@ async function createWindow() {
       partition: 'persist:main',
       userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     },
-    title: "Alamed Management System v2.0.4",
+    title: "Alamid Management System v2.0.4",
     autoHideMenuBar: true
   });
 

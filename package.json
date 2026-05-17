@@ -59,8 +59,8 @@
     "wait-on": "^9.0.5"
   },
   "build": {
-    "appId": "com.alamed.management",
-    "productName": "Alamed",
+    "appId": "com.alamid.management",
+    "productName": "Alamid",
     "directories": {
       "output": "release"
     },

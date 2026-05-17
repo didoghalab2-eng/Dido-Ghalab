@@ -28,11 +28,15 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { Plus, Trash2, FileText, Calculator, Percent } from 'lucide-react';
-import { createDocument, subscribeToCollection } from '@/lib/firestore';
+import { Plus, Trash2, FileText, Calculator, Percent, Calendar } from 'lucide-react';
+import { createDocument, subscribeToCollection, updateDocument } from '@/lib/firestore';
 import { toast } from 'sonner';
-import { Customer, Supplier } from '@/types';
+import { Customer, Supplier, Booking, Account } from '@/types';
 import { useAuth } from '@/lib/AuthContext';
+import { Checkbox } from '@/components/ui/checkbox';
+import { format } from 'date-fns';
+import { ar } from 'date-fns/locale';
+import { cn } from '@/lib/utils';
 
 const invoiceSchema = z.object({
   number: z.string().min(1, 'رقم الفاتورة مطلوب'),
@@ -47,6 +51,7 @@ const invoiceSchema = z.object({
     description: z.string().min(1, 'الوصف مطلوب'),
     quantity: z.coerce.number().min(1),
     amount: z.coerce.number().min(0),
+    bookingId: z.string().optional(),
   })).min(1, 'يجب إضافة بند واحد على الأقل'),
   notes: z.string().optional(),
 });
@@ -56,6 +61,9 @@ export function InvoiceForm() {
   const [open, setOpen] = useState(false);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [selectedBookingIds, setSelectedBookingIds] = useState<string[]>([]);
 
   const form = useForm<z.infer<typeof invoiceSchema>>({
     resolver: zodResolver(invoiceSchema),
@@ -80,11 +88,52 @@ export function InvoiceForm() {
   useEffect(() => {
     const unsubCustomers = subscribeToCollection<Customer>('customers', setCustomers);
     const unsubSuppliers = subscribeToCollection<Supplier>('suppliers', setSuppliers);
+    const unsubBookings = subscribeToCollection<Booking>('bookings', setBookings);
+    const unsubAccounts = subscribeToCollection<Account>('accounts', setAccounts);
     return () => {
       unsubCustomers();
       unsubSuppliers();
+      unsubBookings();
+      unsubAccounts();
     };
   }, []);
+
+  const watchTargetId = form.watch('targetId');
+  const watchTargetType = form.watch('targetType');
+
+  const availableBookings = bookings.filter(b => 
+    b.customerId === watchTargetId && 
+    !b.invoiceId && 
+    b.status !== 'cancelled'
+  );
+
+  const toggleBooking = (booking: Booking) => {
+    const isSelected = selectedBookingIds.includes(booking.id!);
+    if (isSelected) {
+      setSelectedBookingIds(prev => prev.filter(id => id !== booking.id));
+      // Remove from items using bookingId
+      const currentItems = form.getValues('items');
+      const newItems = currentItems.filter(item => item.bookingId !== booking.id);
+      form.setValue('items', newItems.length > 0 ? newItems : [{ description: '', quantity: 1, amount: 0 }]);
+    } else {
+      setSelectedBookingIds(prev => [...prev, booking.id!]);
+      // Add to items
+      const currentItems = form.getValues('items');
+      const bookingDesc = `حجز رحلة: ${booking.from} - ${booking.to} (${format(new Date(booking.date), 'dd/MM/yyyy')})`;
+      const newItem = { 
+        description: bookingDesc, 
+        quantity: 1, 
+        amount: booking.customerPrice,
+        bookingId: booking.id 
+      };
+      
+      if (currentItems.length === 1 && currentItems[0].description === '' && currentItems[0].amount === 0) {
+        form.setValue('items', [newItem]);
+      } else {
+        form.setValue('items', [...currentItems, newItem]);
+      }
+    }
+  };
 
   const watchItems = form.watch('items');
   const watchIsTax = form.watch('isTaxInvoice');
@@ -98,8 +147,13 @@ export function InvoiceForm() {
 
   async function onSubmit(values: z.infer<typeof invoiceSchema>) {
     try {
+      const targetName = values.targetType === 'customer' 
+        ? customers.find(c => c.id === values.targetId)?.name 
+        : suppliers.find(s => s.id === values.targetId)?.name;
+
       const invoiceData = {
         ...values,
+        targetName,
         subtotal,
         vatAmount,
         withholdingTaxAmount: whAmount,
@@ -110,9 +164,55 @@ export function InvoiceForm() {
         createdBy: user?.uid,
       };
 
-      const invoiceId = await createDocument('invoices', invoiceData);
+      const invoiceId = await createDocument('invoices', {
+        ...invoiceData,
+        bookingIds: selectedBookingIds
+      });
 
-      // If it's a tax invoice, record the tax in expenses/income for tracking
+      // 2. Update Bookings with Invoice Info
+      for (const bookingId of selectedBookingIds) {
+        await updateDocument('bookings', bookingId, {
+          invoiceId,
+          invoiceNumber: values.number
+        });
+      }
+
+      // 3. Create Transaction for Posting (Revenue/Receivable)
+      if (values.targetType === 'customer') {
+        let receivablesAccount = accounts.find(a => a.name === 'مدينون (عملاء)' || a.type === 'ledger');
+        
+        if (!receivablesAccount) {
+          const newAccountId = await createDocument('accounts', {
+            name: 'مدينون (عملاء)',
+            type: 'ledger',
+            currency: 'EGP',
+            balance: 0,
+            createdAt: new Date().toISOString()
+          });
+          receivablesAccount = { id: newAccountId, name: 'مدينون (عملاء)', type: 'ledger', currency: 'EGP', balance: 0 };
+        }
+
+        await createDocument('transactions', {
+          date: values.date,
+          type: 'income',
+          amount: total,
+          currency: 'EGP',
+          paymentMethod: 'cash',
+          accountId: receivablesAccount.id!,
+          category: 'invoice_posting',
+          referenceId: invoiceId,
+          description: `إصدار فاتورة مبيعات رقم ${values.number} - ${customers.find(c => c.id === values.targetId)?.name}`,
+          createdAt: new Date().toISOString(),
+          createdBy: user?.uid
+        });
+
+        // Update account balance
+        await updateDocument('accounts', receivablesAccount.id!, {
+          balance: (receivablesAccount.balance || 0) + total
+        });
+      }
+
+      // 4. If it's a tax invoice, record the tax in expenses/income for tracking
       if (values.isTaxInvoice) {
         if (values.targetType === 'customer') {
           // VAT collected from customer (Liability/Income for tax authority)
@@ -224,7 +324,7 @@ export function InvoiceForm() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>نوع الجهة</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
+                    <Select onValueChange={field.onChange} value={field.value || ""}>
                       <FormControl>
                         <SelectTrigger className="rounded-xl h-11">
                           <SelectValue />
@@ -245,7 +345,7 @@ export function InvoiceForm() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>الجهة</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
+                    <Select onValueChange={field.onChange} value={field.value || ""}>
                       <FormControl>
                         <SelectTrigger className="rounded-xl h-11">
                           <SelectValue placeholder="اختر الجهة" />
@@ -263,6 +363,43 @@ export function InvoiceForm() {
                 )}
               />
             </div>
+
+            {watchTargetType === 'customer' && availableBookings.length > 0 && (
+              <div className="p-4 bg-blue-50/30 rounded-2xl border border-blue-100/50 space-y-3">
+                <div className="flex items-center gap-2 text-blue-700 font-bold mb-2">
+                  <Calendar className="w-5 h-5" />
+                  <h3>ربط الحجوزات غير المفوترة</h3>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {availableBookings.map(booking => (
+                    <div 
+                      key={booking.id} 
+                      className={cn(
+                        "flex items-center gap-3 p-3 rounded-xl border transition-all cursor-pointer",
+                        selectedBookingIds.includes(booking.id!) 
+                          ? "bg-blue-600 text-white border-blue-600 shadow-md" 
+                          : "bg-white border-slate-200 hover:border-blue-300"
+                      )}
+                      onClick={() => toggleBooking(booking)}
+                    >
+                      <Checkbox 
+                        checked={selectedBookingIds.includes(booking.id!)}
+                        className={selectedBookingIds.includes(booking.id!) ? "border-white" : ""}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold truncate">{booking.from} - {booking.to}</p>
+                        <p className={cn(
+                          "text-xs",
+                          selectedBookingIds.includes(booking.id!) ? "text-blue-100" : "text-slate-500"
+                        )}>
+                          {format(new Date(booking.date), 'dd/MM/yyyy')} | {booking.customerPrice} {booking.currency}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-4">
               <div className="flex items-center justify-between">

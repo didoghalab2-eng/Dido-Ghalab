@@ -10,10 +10,11 @@ import {
   Truck
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Invoice, AppSettings } from '@/types';
+import { Invoice, AppSettings, Customer, Supplier } from '@/types';
 import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
+import { getDocument } from '@/lib/firestore';
 
 interface InvoicePrintViewProps {
   invoice: Invoice;
@@ -22,13 +23,29 @@ interface InvoicePrintViewProps {
 }
 
 export function InvoicePrintView({ invoice, settings, onClose }: InvoicePrintViewProps) {
+  const [target, setTarget] = React.useState<Customer | Supplier | null>(null);
+
+  React.useEffect(() => {
+    const fetchTarget = async () => {
+      const collection = invoice.targetType === 'customer' ? 'customers' : 'suppliers';
+      const data = await getDocument<Customer | Supplier>(collection, invoice.targetId);
+      setTarget(data);
+    };
+    fetchTarget();
+  }, [invoice.targetId, invoice.targetType]);
+
   const handlePrint = () => {
     window.print();
   };
 
   return (
-    <div className="fixed inset-0 z-[100] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 print:p-0 print:bg-white">
-      <div className="bg-white w-full max-w-[210mm] h-[297mm] shadow-2xl rounded-2xl flex flex-col overflow-hidden print:shadow-none print:rounded-none print:h-auto">
+    <div 
+      className="fixed inset-0 z-[100] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 print:p-0 print:bg-white overflow-y-auto cursor-pointer"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="bg-white w-full max-w-[210mm] min-h-[297mm] shadow-2xl rounded-2xl flex flex-col overflow-hidden print:shadow-none print:rounded-none print:h-auto cursor-default">
         {/* Toolbar - Hidden on Print */}
         <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50 print:hidden">
           <div className="flex items-center gap-2">
@@ -58,10 +75,10 @@ export function InvoicePrintView({ invoice, settings, onClose }: InvoicePrintVie
                   </div>
                   <div>
                     <h1 className="text-2xl font-black text-slate-900 tracking-tight uppercase">
-                      {settings?.companyName || 'ALAMED'}
+                      {settings?.companyName || 'الأمين للنقل'}
                     </h1>
                     <p className="text-[10px] text-slate-500 font-bold tracking-[0.2em] uppercase">
-                      Transport Management
+                      إدارة النقل السياحي
                     </p>
                   </div>
                 </div>
@@ -92,13 +109,25 @@ export function InvoicePrintView({ invoice, settings, onClose }: InvoicePrintVie
                   <div className="flex justify-between gap-8">
                     <span className="text-slate-500 font-medium">التاريخ:</span>
                     <span className="font-bold text-slate-900">
-                      {format(new Date(invoice.date), 'dd/MM/yyyy', { locale: ar })}
+                      {invoice.date ? (() => {
+                        try {
+                          return format(new Date(invoice.date), 'dd/MM/yyyy', { locale: ar });
+                        } catch (e) {
+                          return invoice.date;
+                        }
+                      })() : '---'}
                     </span>
                   </div>
                   <div className="flex justify-between gap-8">
                     <span className="text-slate-500 font-medium">تاريخ الاستحقاق:</span>
                     <span className="font-bold text-slate-900">
-                      {format(new Date(invoice.dueDate), 'dd/MM/yyyy', { locale: ar })}
+                      {invoice.dueDate ? (() => {
+                        try {
+                          return format(new Date(invoice.dueDate), 'dd/MM/yyyy', { locale: ar });
+                        } catch (e) {
+                          return invoice.dueDate;
+                        }
+                      })() : '---'}
                     </span>
                   </div>
                 </div>
@@ -110,11 +139,11 @@ export function InvoicePrintView({ invoice, settings, onClose }: InvoicePrintVie
               <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
                 <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">فاتورة إلى:</h3>
                 <div className="space-y-2">
-                  <p className="text-lg font-bold text-slate-900">شركة النور للسياحة</p>
+                  <p className="text-lg font-bold text-slate-900">{invoice.targetName || target?.name || (invoice.targetType === 'customer' ? 'عميل' : 'مورد')}</p>
                   <div className="space-y-1 text-[11px] text-slate-600">
-                    <p>القاهرة، مصر</p>
-                    <p>الرقم الضريبي: 123-456-789</p>
-                    <p>هاتف: +20 100 000 0000</p>
+                    {target?.address && <p>{target.address}</p>}
+                    {target?.email && <p>{target.email}</p>}
+                    {target?.phone && <p>{target.phone}</p>}
                   </div>
                 </div>
               </div>
@@ -144,24 +173,18 @@ export function InvoicePrintView({ invoice, settings, onClose }: InvoicePrintVie
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  <tr>
-                    <td className="py-5">
-                      <p className="font-bold text-slate-900">خدمة نقل سياحي - مطار الغردقة</p>
-                      <p className="text-[10px] text-slate-500 mt-1">رحلة وصول - سيارة ليموزين - 15/04/2024</p>
-                    </td>
-                    <td className="text-center py-5 font-medium">1</td>
-                    <td className="text-center py-5 font-medium">1,500.00 EGP</td>
-                    <td className="text-left py-5 font-bold text-slate-900">1,500.00 EGP</td>
-                  </tr>
-                  <tr>
-                    <td className="py-5">
-                      <p className="font-bold text-slate-900">رحلة سيتي تور - الجونة</p>
-                      <p className="text-[10px] text-slate-500 mt-1">سيارة ميكروباص - 16/04/2024</p>
-                    </td>
-                    <td className="text-center py-5 font-medium">2</td>
-                    <td className="text-center py-5 font-medium">2,500.00 EGP</td>
-                    <td className="text-left py-5 font-bold text-slate-900">5,000.00 EGP</td>
-                  </tr>
+                  {invoice.items && invoice.items.map((item, index) => (
+                    <tr key={index}>
+                      <td className="py-5">
+                        <p className="font-bold text-slate-900">
+                          {item.description.replace(/\[ID: [^\]]+\]/g, '').trim()}
+                        </p>
+                      </td>
+                      <td className="text-center py-5 font-medium">{item.quantity}</td>
+                      <td className="text-center py-5 font-medium">{item.amount?.toLocaleString() || '0'} ج.م</td>
+                      <td className="text-left py-5 font-bold text-slate-900">{item.total?.toLocaleString() || '0'} ج.م</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -171,15 +194,25 @@ export function InvoicePrintView({ invoice, settings, onClose }: InvoicePrintVie
               <div className="w-full max-w-[250px] space-y-3">
                 <div className="flex justify-between text-[12px]">
                   <span className="text-slate-500 font-medium">المجموع الفرعي:</span>
-                  <span className="font-bold text-slate-900">6,500.00 EGP</span>
+                  <span className="font-bold text-slate-900">{invoice.subtotal?.toLocaleString() || '0'} ج.م</span>
                 </div>
-                <div className="flex justify-between text-[12px]">
-                  <span className="text-slate-500 font-medium">ضريبة القيمة المضافة (14%):</span>
-                  <span className="font-bold text-slate-900">910.00 EGP</span>
-                </div>
+                {invoice.isTaxInvoice && (
+                  <>
+                    <div className="flex justify-between text-[12px]">
+                      <span className="text-slate-500 font-medium">ضريبة القيمة المضافة ({invoice.vatRate}%):</span>
+                      <span className="font-bold text-slate-900">{invoice.vatAmount?.toLocaleString() || '0'} ج.م</span>
+                    </div>
+                    {invoice.withholdingTaxAmount > 0 && (
+                      <div className="flex justify-between text-[12px]">
+                        <span className="text-slate-500 font-medium">خصم وضريبة أرباح تجارية ({invoice.withholdingTaxRate}%):</span>
+                        <span className="font-bold text-slate-900">-{invoice.withholdingTaxAmount?.toLocaleString() || '0'} ج.م</span>
+                      </div>
+                    )}
+                  </>
+                )}
                 <div className="flex justify-between items-center pt-3 border-t-2 border-slate-900">
                   <span className="text-sm font-black text-slate-900">الإجمالي الكلي:</span>
-                  <span className="text-xl font-black text-blue-600">7,410.00 EGP</span>
+                  <span className="text-xl font-black text-blue-600">{invoice.total?.toLocaleString() || '0'} ج.م</span>
                 </div>
               </div>
             </div>
@@ -191,7 +224,7 @@ export function InvoicePrintView({ invoice, settings, onClose }: InvoicePrintVie
                 <div className="space-y-1 text-[11px] text-slate-600">
                   <p className="font-bold text-slate-900">البنك الأهلي المصري</p>
                   <p>رقم الحساب: 1234567890123456</p>
-                  <p>IBAN: EG123456789012345678901234567</p>
+                  <p>رقم الحساب الدولي (IBAN): EG123456789012345678901234567</p>
                 </div>
               </div>
               
@@ -199,7 +232,7 @@ export function InvoicePrintView({ invoice, settings, onClose }: InvoicePrintVie
                 <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">ملاحظات:</h3>
                 <p className="text-[11px] text-slate-500 leading-relaxed">
                   يرجى سداد قيمة الفاتورة في الموعد المحدد لتجنب غرامات التأخير.
-                  شكراً لتعاملكم مع شركة ALAMED.
+                  شكراً لتعاملكم مع شركة الأمين.
                 </p>
               </div>
             </div>

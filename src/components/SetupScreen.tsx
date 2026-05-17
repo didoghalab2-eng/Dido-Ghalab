@@ -46,9 +46,16 @@ export function SetupScreen() {
         setupCompleted: true,
       });
       toast.success('تم إعداد النظام بنجاح');
-    } catch (error) {
-      console.error(error);
-      toast.error('حدث خطأ أثناء الإعداد');
+    } catch (error: any) {
+      console.error("Setup Error:", error);
+      let errorMessage = 'حدث خطأ أثناء الإعداد';
+      try {
+        const parsedError = JSON.parse(error.message);
+        if (parsedError.error) errorMessage = `خطأ في قاعدة البيانات: ${parsedError.error}`;
+      } catch (e) {
+        if (error.message) errorMessage = `خطأ: ${error.message}`;
+      }
+      toast.error(errorMessage);
     }
   }
 
@@ -62,7 +69,7 @@ export function SetupScreen() {
             </div>
           </div>
           <CardTitle className="text-3xl font-bold tracking-tight">إعداد النظام</CardTitle>
-          <CardDescription className="text-slate-400 mt-2">يرجى إدخال بيانات الشركة لبدء استخدام Alamed</CardDescription>
+          <CardDescription className="text-slate-400 mt-2">يرجى إدخال بيانات الشركة لبدء استخدام Alamid</CardDescription>
         </CardHeader>
         <CardContent className="px-8 pb-10">
           <Form {...form}>

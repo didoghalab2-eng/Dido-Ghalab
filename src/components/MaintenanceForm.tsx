@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -28,61 +28,174 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Plus, CalendarIcon } from 'lucide-react';
-import { createDocument } from '@/lib/firestore';
+import { createDocument, updateDocument, subscribeToCollection } from '@/lib/firestore';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
+import { Maintenance, Vehicle, Account } from '@/types';
+import { useAuth } from '@/lib/AuthContext';
 
 const formSchema = z.object({
-  carNumber: z.string().min(1, 'رقم السيارة مطلوب'),
+  vehicleId: z.string().min(1, 'السيارة مطلوبة'),
+  carNumber: z.string(),
   date: z.date(),
   type: z.string().min(1, 'نوع الصيانة مطلوب'),
   cost: z.coerce.number().min(0),
   paymentMethod: z.string(),
+  accountId: z.string().min(1, 'الحساب مطلوب'),
   faultType: z.string().min(1, 'نوع العطل مطلوب'),
   location: z.enum(['agency', 'workshop']),
   kilometers: z.coerce.number().min(0),
 });
 
-export function MaintenanceForm() {
-  const [open, setOpen] = useState(false);
+interface MaintenanceFormProps {
+  maintenance?: Maintenance;
+  trigger?: React.ReactNode;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}
+
+export function MaintenanceForm({ maintenance, trigger, open: controlledOpen, onOpenChange: setControlledOpen }: MaintenanceFormProps) {
+  const { user } = useAuth();
+  const [internalOpen, setInternalOpen] = useState(false);
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+
+  useEffect(() => {
+    const unsubVehicles = subscribeToCollection<Vehicle>('vehicles', setVehicles);
+    const unsubAccounts = subscribeToCollection<Account>('accounts', setAccounts);
+    return () => {
+      unsubVehicles();
+      unsubAccounts();
+    };
+  }, []);
+  
+  const open = controlledOpen !== undefined ? controlledOpen : internalOpen;
+  const setOpen = setControlledOpen !== undefined ? setControlledOpen : setInternalOpen;
+
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      carNumber: '',
-      date: new Date(),
-      type: 'periodic',
-      cost: 0,
-      paymentMethod: 'cash',
-      faultType: '',
-      location: 'workshop',
-      kilometers: 0,
+      vehicleId: maintenance?.vehicleId || '',
+      carNumber: maintenance?.carNumber || '',
+      date: maintenance?.date ? new Date(maintenance.date) : new Date(),
+      type: maintenance?.type || 'periodic',
+      cost: maintenance?.cost || 0,
+      paymentMethod: maintenance?.paymentMethod || 'cash',
+      accountId: maintenance?.accountId || '',
+      faultType: maintenance?.faultType || '',
+      location: (maintenance?.location as 'agency' | 'workshop') || 'workshop',
+      kilometers: maintenance?.kilometers || 0,
     },
   });
 
+  useEffect(() => {
+    if (open) {
+      form.reset({
+        vehicleId: maintenance?.vehicleId || '',
+        carNumber: maintenance?.carNumber || '',
+        date: maintenance?.date ? new Date(maintenance.date) : new Date(),
+        type: maintenance?.type || 'periodic',
+        cost: maintenance?.cost || 0,
+        paymentMethod: maintenance?.paymentMethod || 'cash',
+        accountId: maintenance?.accountId || '',
+        faultType: maintenance?.faultType || '',
+        location: (maintenance?.location as 'agency' | 'workshop') || 'workshop',
+        kilometers: maintenance?.kilometers || 0,
+      });
+    }
+  }, [maintenance, open, form]);
+
   async function onSubmit(values: z.infer<typeof formSchema>) {
     try {
-      await createDocument('maintenance', {
-        ...values,
-        date: values.date.toISOString(),
-      });
-      toast.success('تم إضافة سجل الصيانة بنجاح');
+      const selectedVehicle = vehicles.find(v => v.id === values.vehicleId);
+      const selectedAccount = accounts.find(a => a.id === values.accountId);
+
+      if (maintenance?.id) {
+        await updateDocument('maintenance', maintenance.id, {
+          ...values,
+          carNumber: selectedVehicle?.plateNumber || values.carNumber,
+          date: values.date.toISOString(),
+        });
+        toast.success('تم تحديث سجل الصيانة بنجاح');
+      } else {
+        const maintenanceId = await createDocument('maintenance', {
+          ...values,
+          carNumber: selectedVehicle?.plateNumber || values.carNumber,
+          date: values.date.toISOString(),
+          createdAt: new Date().toISOString(),
+        });
+
+        // Post to Accounting (Expense)
+        if (values.cost > 0 && selectedAccount) {
+          const expenseId = await createDocument('expenses', {
+            date: values.date.toISOString(),
+            category: 'operating',
+            subCategory: 'maintenance',
+            amount: values.cost,
+            currency: selectedAccount.currency,
+            description: `صيانة سيارة ${selectedVehicle?.plateNumber || values.carNumber} - ${values.faultType}`,
+            paymentMethod: values.paymentMethod as any,
+            accountId: values.accountId,
+            vehicleId: values.vehicleId,
+            referenceId: maintenanceId,
+            createdAt: new Date().toISOString(),
+          });
+
+          // Post to Treasury (Transaction)
+          await createDocument('transactions', {
+            date: values.date.toISOString(),
+            type: 'expense',
+            amount: values.cost,
+            currency: selectedAccount.currency,
+            paymentMethod: values.paymentMethod as any,
+            accountId: values.accountId,
+            category: 'maintenance',
+            referenceId: expenseId,
+            description: `صيانة سيارة ${selectedVehicle?.plateNumber || values.carNumber} - ${values.faultType}`,
+            createdAt: new Date().toISOString(),
+            createdBy: user?.uid || '',
+          });
+
+          // Update Account Balance
+          await updateDocument('accounts', selectedAccount.id!, {
+            balance: selectedAccount.balance - values.cost
+          });
+        }
+
+        toast.success('تم إضافة سجل الصيانة وترحيله للحسابات بنجاح');
+      }
+
+      // Update vehicle's last maintenance km and current km if higher
+      if (selectedVehicle) {
+        const updateData: any = {
+          lastMaintenanceKm: values.kilometers
+        };
+        if (values.kilometers > (selectedVehicle.currentKm || 0)) {
+          updateData.currentKm = values.kilometers;
+        }
+        await updateDocument('vehicles', selectedVehicle.id!, updateData);
+      }
+
       setOpen(false);
       form.reset();
     } catch (error) {
-      toast.error('حدث خطأ أثناء إضافة سجل الصيانة');
+      console.error(error);
+      toast.error(maintenance ? 'حدث خطأ أثناء تحديث سجل الصيانة' : 'حدث خطأ أثناء إضافة سجل الصيانة');
     }
   }
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button className="bg-blue-600 hover:bg-blue-700 text-white gap-2 h-11 px-6 rounded-xl shadow-lg shadow-blue-600/20">
-          <Plus className="w-5 h-5" />
-          <span>صيانة جديدة</span>
-        </Button>
+      <DialogTrigger asChild nativeButton={!trigger}>
+        {trigger || (
+          <Button className="bg-blue-600 hover:bg-blue-700 text-white gap-2 h-11 px-6 rounded-xl shadow-lg shadow-blue-600/20">
+            <Plus className="w-5 h-5" />
+            <span>صيانة جديدة</span>
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
@@ -93,13 +206,22 @@ export function MaintenanceForm() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <FormField
                 control={form.control}
-                name="carNumber"
+                name="vehicleId"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>رقم السيارة</FormLabel>
-                    <FormControl>
-                      <Input placeholder="أ ب ج 123" {...field} />
-                    </FormControl>
+                    <FormLabel>السيارة</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value || ""}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="اختر السيارة" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {vehicles.map(v => (
+                          <SelectItem key={v.id} value={v.id!}>{v.plateNumber} ({v.model})</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -151,7 +273,7 @@ export function MaintenanceForm() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>نوع الصيانة</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
+                    <Select onValueChange={field.onChange} value={field.value || ""}>
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="اختر نوع الصيانة" />
@@ -173,7 +295,7 @@ export function MaintenanceForm() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>مكان الصيانة</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
+                    <Select onValueChange={field.onChange} value={field.value || ""}>
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="اختر المكان" />
@@ -233,7 +355,7 @@ export function MaintenanceForm() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>طريقة الدفع</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
+                    <Select onValueChange={field.onChange} value={field.value || ""}>
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="اختر الطريقة" />
@@ -243,6 +365,28 @@ export function MaintenanceForm() {
                         <SelectItem value="cash">نقداً</SelectItem>
                         <SelectItem value="petty_cash">من العهدة</SelectItem>
                         <SelectItem value="bank_transfer">تحويل بنكي</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="accountId"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>الحساب المالي</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value || ""}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="اختر الحساب" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {accounts.map(a => (
+                          <SelectItem key={a.id} value={a.id!}>{a.name} ({a.currency})</SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                     <FormMessage />

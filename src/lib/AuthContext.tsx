@@ -28,43 +28,54 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
-      setUser(firebaseUser);
-      
-      if (firebaseUser) {
-        // Fetch role
-        const userData = await getDocument<UserProfile>('users', firebaseUser.uid);
-        if (userData) {
-          setRole(userData.role);
+      try {
+        setUser(firebaseUser);
+        
+        if (firebaseUser) {
+          // Fetch role
+          const userData = await getDocument<UserProfile>('users', firebaseUser.uid);
+          if (userData) {
+            setRole(userData.role);
+          } else {
+            // New user logic
+            const isMasterAdmin = firebaseUser.email === MASTER_ADMIN_EMAIL;
+            const newRole: UserRole = isMasterAdmin ? 'admin' : 'expenses';
+            
+            const newProfile: UserProfile = {
+              id: firebaseUser.uid,
+              email: firebaseUser.email || '',
+              role: newRole
+            };
+            
+            try {
+              await setDocument('users', firebaseUser.uid, newProfile);
+              setRole(newRole);
+            } catch (err) {
+              console.error("Failed to create user profile:", err);
+              setRole(newRole);
+            }
+          }
         } else {
-          // New user logic
-          const isMasterAdmin = firebaseUser.email === MASTER_ADMIN_EMAIL;
-          const newRole: UserRole = isMasterAdmin ? 'admin' : 'expenses'; // Default to lowest privilege
-          
-          const newProfile: UserProfile = {
-            id: firebaseUser.uid,
-            email: firebaseUser.email || '',
-            role: newRole
-          };
-          
-          await setDocument('users', firebaseUser.uid, newProfile);
-          setRole(newRole);
+          setRole(null);
         }
-      } else {
-        setRole(null);
+      } catch (error) {
+        console.error("Auth initialization error:", error);
+      } finally {
+        setLoading(false);
       }
-      
-      setLoading(false);
     });
 
+    return () => unsubscribeAuth();
+  }, []);
+
+  useEffect(() => {
+    // Only subscribe to settings if we have a user (though rules allow public read for 'app')
     const unsubscribeSettings = subscribeToDocument<AppSettings>('settings', 'app', (data) => {
       setSettings(data);
     });
 
-    return () => {
-      unsubscribeAuth();
-      unsubscribeSettings();
-    };
-  }, []);
+    return () => unsubscribeSettings();
+  }, [user]);
 
   return (
     <AuthContext.Provider value={{ user, role, settings, loading }}>

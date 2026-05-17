@@ -37,6 +37,8 @@ import { Badge } from '@/components/ui/badge';
 export function MaintenanceList() {
   const [maintenanceRecords, setMaintenanceRecords] = useState<Maintenance[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [editingRecord, setEditingRecord] = useState<Maintenance | null>(null);
+  const [isFormOpen, setIsFormOpen] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -154,7 +156,13 @@ export function MaintenanceList() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-40 rounded-xl">
-                          <DropdownMenuItem className="gap-2 cursor-pointer">
+                          <DropdownMenuItem 
+                            className="gap-2 cursor-pointer" 
+                            onClick={() => {
+                              setEditingRecord(record);
+                              setIsFormOpen(true);
+                            }}
+                          >
                             <Edit className="w-4 h-4" />
                             <span>تعديل</span>
                           </DropdownMenuItem>
@@ -175,6 +183,17 @@ export function MaintenanceList() {
           </Table>
         </div>
       </div>
+      
+      {isFormOpen && (
+        <MaintenanceForm 
+          maintenance={editingRecord || undefined} 
+          open={isFormOpen} 
+          onOpenChange={(open) => {
+            setIsFormOpen(open);
+            if (!open) setEditingRecord(null);
+          }} 
+        />
+      )}
     </div>
   );
 }

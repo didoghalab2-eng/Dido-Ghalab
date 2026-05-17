@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Search, 
   MoreVertical, 
@@ -30,11 +30,17 @@ import { PriceList } from '@/types';
 import { Badge } from '@/components/ui/badge';
 import { PriceListForm } from './PriceListForm';
 import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
+import { TRIP_TYPES } from '@/constants/hotels';
 
 export function PriceLists() {
   const [priceLists, setPriceLists] = useState<PriceList[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
+  const [editingList, setEditingList] = useState<PriceList | null>(null);
+  const [isFormOpen, setIsFormOpen] = useState(false);
+
+  const [expandedListId, setExpandedListId] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubscribe = subscribeToCollection<PriceList>('priceLists', (data) => {
@@ -103,8 +109,15 @@ export function PriceLists() {
                 </TableRow>
               ) : (
                 priceLists.map((list) => (
-                  <TableRow key={list.id} className="hover:bg-slate-50/50 transition-colors">
-                    <TableCell>
+                  <React.Fragment key={list.id}>
+                    <TableRow 
+                      className={cn(
+                        "hover:bg-slate-50/50 transition-colors cursor-pointer",
+                        expandedListId === list.id && "bg-blue-50/30"
+                      )}
+                      onClick={() => setExpandedListId(expandedListId === list.id ? null : list.id!)}
+                    >
+                      <TableCell>
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600">
                           <DollarSign className="w-5 h-5" />
@@ -131,15 +144,16 @@ export function PriceLists() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-40 rounded-xl">
-                          <PriceListForm 
-                            priceList={list} 
-                            trigger={
-                              <DropdownMenuItem className="gap-2 cursor-pointer" onSelect={(e) => e.preventDefault()}>
-                                <Edit className="w-4 h-4" />
-                                <span>تعديل الأسعار</span>
-                              </DropdownMenuItem>
-                            }
-                          />
+                          <DropdownMenuItem 
+                            className="gap-2 cursor-pointer" 
+                            onClick={() => {
+                              setEditingList(list);
+                              setIsFormOpen(true);
+                            }}
+                          >
+                            <Edit className="w-4 h-4" />
+                            <span>تعديل الأسعار</span>
+                          </DropdownMenuItem>
                           <DropdownMenuItem 
                             className="gap-2 cursor-pointer text-red-600 focus:text-red-600 focus:bg-red-50"
                             onClick={() => list.id && handleDelete(list.id)}
@@ -151,12 +165,61 @@ export function PriceLists() {
                       </DropdownMenu>
                     </TableCell>
                   </TableRow>
-                ))
-              )}
+                  
+                  {expandedListId === list.id && (
+                    <TableRow className="bg-slate-50/30 border-b border-slate-100">
+                      <TableCell colSpan={4} className="p-0">
+                        <div className="p-6 space-y-4">
+                          <h4 className="font-bold text-slate-900 border-b border-slate-200 pb-2">تفاصيل الأسعار والمسارات</h4>
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {list.prices.map((p, idx) => (
+                              <div key={idx} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-2">
+                                <div className="flex justify-between items-center">
+                                  <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 border-none font-bold">
+                                    {TRIP_TYPES.find(t => t.id === p.operationType)?.label || p.operationType}
+                                  </Badge>
+                                  <span className="font-black text-emerald-600 text-lg">
+                                    {p.price.toLocaleString()} {p.currency}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-2 text-slate-600">
+                                  <Car className="w-4 h-4" />
+                                  <span className="text-sm">{p.vehicleType === 'limousine' ? 'ليموزين' : p.vehicleType === 'microbus' ? 'ميكروباص' : p.vehicleType === 'coaster' ? 'كوستر' : 'أتوبيس'}</span>
+                                </div>
+                                {(p.from || p.to) ? (
+                                  <div className="flex items-center gap-2 text-slate-900 font-bold bg-slate-50 p-2 rounded-lg">
+                                    <MapPin className="w-4 h-4 text-blue-600" />
+                                    <span className="text-sm">{p.from || '---'} ➔ {p.to || '---'}</span>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center gap-2 text-slate-400 italic">
+                                    <MapPin className="w-4 h-4" />
+                                    <span className="text-sm">لم يتم تحديد مسار</span>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </React.Fragment>
+              ))
+            )}
             </TableBody>
           </Table>
         </div>
       </div>
+
+      <PriceListForm 
+        priceList={editingList || undefined} 
+        open={isFormOpen}
+        onOpenChange={(open) => {
+          setIsFormOpen(open);
+          if (!open) setEditingList(null);
+        }}
+      />
     </div>
   );
 }

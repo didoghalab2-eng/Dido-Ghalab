@@ -36,6 +36,8 @@ import { REGIONS, TRIP_TYPES } from '@/constants/hotels';
 const priceItemSchema = z.object({
   operationType: z.string().min(1, 'نوع الرحلة مطلوب'),
   region: z.string().optional(),
+  from: z.string().optional(),
+  to: z.string().optional(),
   route: z.string().optional(),
   vehicleType: z.enum(['limousine', 'microbus', 'coaster', 'bus']),
   price: z.coerce.number().min(0),
@@ -52,10 +54,16 @@ const formSchema = z.object({
 interface PriceListFormProps {
   priceList?: PriceList;
   trigger?: React.ReactNode;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
-export function PriceListForm({ priceList, trigger }: PriceListFormProps) {
-  const [open, setOpen] = useState(false);
+export function PriceListForm({ priceList, trigger, open: externalOpen, onOpenChange: setExternalOpen }: PriceListFormProps) {
+  const [internalOpen, setInternalOpen] = useState(false);
+  
+  const open = externalOpen !== undefined ? externalOpen : internalOpen;
+  const setOpen = setExternalOpen !== undefined ? setExternalOpen : setInternalOpen;
+
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
 
@@ -79,9 +87,27 @@ export function PriceListForm({ priceList, trigger }: PriceListFormProps) {
       name: '',
       targetType: 'customer',
       targetId: '',
-      prices: [{ operationType: 'arrival', region: '', route: '', vehicleType: 'limousine', price: 0, currency: 'EGP' }],
+      prices: [{ operationType: 'arrival', region: '', from: '', to: '', route: '', vehicleType: 'limousine', price: 0, currency: 'EGP' }],
     },
   });
+
+  useEffect(() => {
+    if (priceList && open) {
+      form.reset({
+        name: priceList.name,
+        targetType: priceList.targetType,
+        targetId: priceList.targetId,
+        prices: priceList.prices,
+      });
+    } else if (!priceList && open) {
+      form.reset({
+        name: '',
+        targetType: 'customer',
+        targetId: '',
+        prices: [{ operationType: 'arrival', region: '', from: '', to: '', route: '', vehicleType: 'limousine', price: 0, currency: 'EGP' }],
+      });
+    }
+  }, [priceList, open, form]);
 
   const { fields, append, remove } = useFieldArray({
     control: form.control,
@@ -145,7 +171,7 @@ export function PriceListForm({ priceList, trigger }: PriceListFormProps) {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>الجهة</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
+                    <Select onValueChange={field.onChange} value={field.value || ""}>
                       <FormControl>
                         <SelectTrigger className="rounded-xl h-11">
                           <SelectValue placeholder="اختر الجهة" />
@@ -166,7 +192,7 @@ export function PriceListForm({ priceList, trigger }: PriceListFormProps) {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>{targetType === 'customer' ? 'العميل' : 'المورد'}</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
+                    <Select onValueChange={field.onChange} value={field.value || ""}>
                       <FormControl>
                         <SelectTrigger className="rounded-xl h-11">
                           <SelectValue placeholder={`اختر ${targetType === 'customer' ? 'العميل' : 'المورد'}`} />
@@ -195,7 +221,7 @@ export function PriceListForm({ priceList, trigger }: PriceListFormProps) {
                   type="button" 
                   variant="outline" 
                   size="sm" 
-                  onClick={() => append({ operationType: 'arrival', region: '', route: '', vehicleType: 'limousine', price: 0, currency: 'EGP' })}
+                  onClick={() => append({ operationType: 'arrival', region: '', from: '', to: '', route: '', vehicleType: 'limousine', price: 0, currency: 'EGP' })}
                   className="rounded-lg gap-1"
                 >
                   <Plus className="w-4 h-4" />
@@ -215,7 +241,7 @@ export function PriceListForm({ priceList, trigger }: PriceListFormProps) {
                         render={({ field }) => (
                           <FormItem className="md:col-span-1">
                             <FormLabel className="text-xs">نوع الرحلة</FormLabel>
-                            <Select onValueChange={field.onChange} value={field.value}>
+                            <Select onValueChange={field.onChange} value={field.value || ""}>
                               <FormControl>
                                 <SelectTrigger className="h-10 bg-white">
                                   <SelectValue />
@@ -237,7 +263,7 @@ export function PriceListForm({ priceList, trigger }: PriceListFormProps) {
                         render={({ field }) => (
                           <FormItem className="md:col-span-1">
                             <FormLabel className="text-xs">المنطقة/المدينة</FormLabel>
-                            <Select onValueChange={field.onChange} value={field.value}>
+                            <Select onValueChange={field.onChange} value={field.value || ""}>
                               <FormControl>
                                 <SelectTrigger className="h-10 bg-white">
                                   <SelectValue placeholder="اختر المنطقة" />
@@ -256,10 +282,23 @@ export function PriceListForm({ priceList, trigger }: PriceListFormProps) {
                       />
                       <FormField
                         control={form.control}
-                        name={`prices.${index}.route`}
+                        name={`prices.${index}.from`}
                         render={({ field }) => (
                           <FormItem className="md:col-span-1">
-                            <FormLabel className="text-xs">المسار (اختياري)</FormLabel>
+                            <FormLabel className="text-xs">من</FormLabel>
+                            <FormControl>
+                              <Input placeholder="مثال: الغردقة" {...field} className="h-10 bg-white" />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
+                        name={`prices.${index}.to`}
+                        render={({ field }) => (
+                          <FormItem className="md:col-span-1">
+                            <FormLabel className="text-xs">إلى</FormLabel>
                             <FormControl>
                               <Input placeholder="مثال: القاهرة" {...field} className="h-10 bg-white" />
                             </FormControl>
@@ -273,7 +312,7 @@ export function PriceListForm({ priceList, trigger }: PriceListFormProps) {
                         render={({ field }) => (
                           <FormItem className="md:col-span-1">
                             <FormLabel className="text-xs">نوع المركبة</FormLabel>
-                            <Select onValueChange={field.onChange} value={field.value}>
+                            <Select onValueChange={field.onChange} value={field.value || ""}>
                               <FormControl>
                                 <SelectTrigger className="h-10 bg-white">
                                   <SelectValue />
@@ -309,7 +348,7 @@ export function PriceListForm({ priceList, trigger }: PriceListFormProps) {
                         render={({ field }) => (
                           <FormItem className="md:col-span-1">
                             <FormLabel className="text-xs">العملة</FormLabel>
-                            <Select onValueChange={field.onChange} value={field.value}>
+                            <Select onValueChange={field.onChange} value={field.value || ""}>
                               <FormControl>
                                 <SelectTrigger className="h-10 bg-white">
                                   <SelectValue />

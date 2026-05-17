@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -27,8 +27,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { createDocument } from '@/lib/firestore';
+import { createDocument, updateDocument } from '@/lib/firestore';
 import { toast } from 'sonner';
+import { Customer } from '@/types';
 
 const customerSchema = z.object({
   name: z.string().min(1, 'الاسم مطلوب'),
@@ -36,51 +37,92 @@ const customerSchema = z.object({
   email: z.string().email('بريد إلكتروني غير صالح').or(z.literal('')),
   type: z.enum(['individual', 'company', 'agency']),
   address: z.string().optional(),
-  paymentMethod: z.enum(['cash', 'instapay', 'bank_transfer', 'e_wallet']).default('cash'),
+  paymentMethod: z.enum(['cash', 'instapay', 'bank_transfer', 'e_wallet', 'check']).default('cash'),
   currency: z.enum(['EGP', 'USD', 'EUR']).default('EGP'),
   initialBalance: z.coerce.number().default(0),
 });
 
-export function CustomerForm() {
-  const [open, setOpen] = useState(false);
+interface CustomerFormProps {
+  customer?: Customer;
+  trigger?: React.ReactNode;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}
+
+export function CustomerForm({ customer, trigger, open: controlledOpen, onOpenChange: setControlledOpen }: CustomerFormProps) {
+  const [internalOpen, setInternalOpen] = useState(false);
+  
+  const open = controlledOpen !== undefined ? controlledOpen : internalOpen;
+  const setOpen = setControlledOpen !== undefined ? setControlledOpen : setInternalOpen;
+  
   const form = useForm<z.infer<typeof customerSchema>>({
     resolver: zodResolver(customerSchema),
     defaultValues: {
-      name: '',
-      phone: '',
-      email: '',
-      type: 'individual',
-      address: '',
-      paymentMethod: 'cash',
-      currency: 'EGP',
-      initialBalance: 0,
+      name: customer?.name || '',
+      phone: customer?.phone || '',
+      email: customer?.email || '',
+      type: customer?.type || 'individual',
+      address: customer?.address || '',
+      paymentMethod: customer?.paymentMethod || 'cash',
+      currency: customer?.currency || 'EGP',
+      initialBalance: customer?.initialBalance || 0,
     },
   });
 
+  useEffect(() => {
+    if (open) {
+      form.reset({
+        name: customer?.name || '',
+        phone: customer?.phone || '',
+        email: customer?.email || '',
+        type: customer?.type || 'individual',
+        address: customer?.address || '',
+        paymentMethod: customer?.paymentMethod || 'cash',
+        currency: customer?.currency || 'EGP',
+        initialBalance: customer?.initialBalance || 0,
+      });
+    }
+  }, [customer, open, form]);
+
   async function onSubmit(values: z.infer<typeof customerSchema>) {
     try {
-      await createDocument('customers', values);
-      toast.success('تم إضافة العميل بنجاح');
+      if (customer?.id) {
+        await updateDocument('customers', customer.id, values);
+        toast.success('تم تحديث بيانات العميل بنجاح');
+      } else {
+        await createDocument('customers', values);
+        toast.success('تم إضافة العميل بنجاح');
+      }
       setOpen(false);
       form.reset();
-    } catch (error) {
-      toast.error('حدث خطأ أثناء إضافة العميل');
+    } catch (error: any) {
+      console.error("Customer Submission Error:", error);
+      let errorMessage = 'حدث خطأ أثناء حفظ بيانات العميل';
+      try {
+        const parsedError = JSON.parse(error.message);
+        if (parsedError.error) errorMessage = `خطأ في قاعدة البيانات: ${parsedError.error}`;
+      } catch (e) {
+        if (error.message) errorMessage = `خطأ: ${error.message}`;
+      }
+      toast.error(errorMessage);
     }
   }
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button className="bg-blue-600 hover:bg-blue-700 text-white gap-2 h-11 px-6 rounded-xl shadow-lg shadow-blue-600/20">
-          <Plus className="w-5 h-5" />
-          <span>إضافة عميل</span>
-        </Button>
+      <DialogTrigger asChild nativeButton={!trigger}>
+        {trigger || (
+          <Button className="bg-blue-600 hover:bg-blue-700 text-white gap-2 h-11 px-6 rounded-xl shadow-lg shadow-blue-600/20">
+            <Plus className="w-5 h-5" />
+            <span>إضافة عميل</span>
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent className="sm:max-w-[500px] rounded-2xl">
         <DialogHeader>
           <DialogTitle className="text-2xl font-bold flex items-center gap-2">
             <User className="w-6 h-6 text-blue-600" />
-            إضافة عميل جديد
+            {customer ? 'تعديل بيانات العميل' : 'إضافة عميل جديد'}
           </DialogTitle>
         </DialogHeader>
         <Form {...form}>
@@ -125,7 +167,7 @@ export function CustomerForm() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>نوع العميل</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
+                    <Select onValueChange={field.onChange} value={field.value || ""}>
                       <FormControl>
                         <SelectTrigger className="rounded-xl h-11">
                           <SelectValue placeholder="اختر النوع" />
@@ -184,7 +226,7 @@ export function CustomerForm() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>طريقة الدفع المفضلة</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
+                    <Select onValueChange={field.onChange} value={field.value || ""}>
                       <FormControl>
                         <SelectTrigger className="rounded-xl h-11">
                           <SelectValue placeholder="اختر الطريقة" />
@@ -207,7 +249,7 @@ export function CustomerForm() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>العملة المفضلة</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
+                    <Select onValueChange={field.onChange} value={field.value || ""}>
                       <FormControl>
                         <SelectTrigger className="rounded-xl h-11">
                           <SelectValue placeholder="اختر العملة" />
@@ -247,7 +289,7 @@ export function CustomerForm() {
                 إلغاء
               </Button>
               <Button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white rounded-xl h-11 px-8">
-                حفظ العميل
+                {customer ? 'تحديث البيانات' : 'حفظ العميل'}
               </Button>
             </div>
           </form>

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -33,11 +33,12 @@ import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
-import { CalendarIcon, Plus, MapPin, Plane, Car, User, DollarSign, FileText } from 'lucide-react';
+import { CalendarIcon, Plus, MapPin, Plane, Car, User, DollarSign, FileText, ArrowRightLeft } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { createDocument, subscribeToCollection, updateDocument, queryDocuments } from '@/lib/firestore';
+import { createDocument, subscribeToCollection, updateDocument, queryDocuments, deleteDocument } from '@/lib/firestore';
 import { toast } from 'sonner';
 import { REGIONS, HOTELS_BY_REGION, AIRPORTS, TRIP_TYPES } from '@/constants/hotels';
+import { estimateTripDuration } from '@/services/geminiService';
 
 const findRegionByHotel = (hotelName: string) => {
   for (const regionId in HOTELS_BY_REGION) {
@@ -48,7 +49,7 @@ const findRegionByHotel = (hotelName: string) => {
   const region = REGIONS.find(r => r.label === hotelName || r.id === hotelName);
   return region?.id;
 };
-import { Driver, Vehicle, Customer, Account, PriceList } from '@/types';
+import { Driver, Vehicle, Customer, Account, PriceList, Booking, Supplier, Expense, Transaction } from '@/types';
 import { useAuth } from '@/lib/AuthContext';
 
 const formSchema = z.object({
@@ -88,14 +89,26 @@ const formSchema = z.object({
   notes: z.string().optional(),
 });
 
-export function BookingForm() {
+interface BookingFormProps {
+  booking?: Booking;
+  trigger?: React.ReactNode;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}
+
+export function BookingForm({ booking, trigger, open: controlledOpen, onOpenChange: setControlledOpen }: BookingFormProps) {
   const { user } = useAuth();
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  
+  const open = controlledOpen !== undefined ? controlledOpen : internalOpen;
+  const setOpen = setControlledOpen !== undefined ? setControlledOpen : setInternalOpen;
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [suppliers, setSuppliers] = useState<{id: string, name: string}[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [priceLists, setPriceLists] = useState<PriceList[]>([]);
 
   useEffect(() => {
     const unsubDrivers = subscribeToCollection<Driver>('drivers', setDrivers);
@@ -103,49 +116,185 @@ export function BookingForm() {
     const unsubCustomers = subscribeToCollection<Customer>('customers', setCustomers);
     const unsubSuppliers = subscribeToCollection<{id: string, name: string}>('suppliers', setSuppliers);
     const unsubAccounts = subscribeToCollection<Account>('accounts', setAccounts);
+    const unsubTransactions = subscribeToCollection<Transaction>('transactions', setTransactions);
+    const unsubPriceLists = subscribeToCollection<PriceList>('priceLists', setPriceLists);
     return () => {
       unsubDrivers();
       unsubVehicles();
       unsubCustomers();
       unsubSuppliers();
       unsubAccounts();
+      unsubTransactions();
+      unsubPriceLists();
     };
   }, []);
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      customerId: '',
-      customerName: '',
-      paxCount: 1,
-      operationType: 'arrival',
-      vehicleType: 'limousine',
-      currency: 'EGP',
-      collectedCurrency: 'EGP',
-      paymentMethod: 'cash',
-      tips: 0,
-      otherExpenses: 0,
-      collectedAmount: 0,
-      supplierPrice: 0,
-      status: 'on_request',
-      visaPrice: 0,
-      visaCurrency: 'USD',
-      visaCount: 0,
-      visaExpenses: 0,
-      permitType: 'none',
-      permitCost: 0,
-      collectionAccountId: '',
-      meetingTime: '',
-      from: '',
-      to: '',
+      customerId: booking?.customerId || '',
+      customerName: booking?.customerName || '',
+      paxCount: booking?.paxCount || 1,
+      operationType: booking?.operationType || 'arrival',
+      vehicleType: booking?.vehicleType || 'limousine',
+      currency: booking?.currency || 'EGP',
+      collectedCurrency: booking?.collectedCurrency || 'EGP',
+      paymentMethod: booking?.paymentMethod || 'cash',
+      tips: booking?.tips || 0,
+      otherExpenses: booking?.otherExpenses || 0,
+      collectedAmount: booking?.collectedAmount || 0,
+      supplierPrice: booking?.supplierPrice || 0,
+      status: booking?.status || 'on_request',
+      visaPrice: booking?.visaPrice || 0,
+      visaCurrency: booking?.visaCurrency || 'USD',
+      visaCount: booking?.visaCount || 0,
+      visaExpenses: booking?.visaExpenses || 0,
+      permitType: booking?.permitType || 'none',
+      permitCost: booking?.permitCost || 0,
+      collectionAccountId: booking?.collectionAccountId || '',
+      meetingTime: booking?.meetingTime || '',
+      from: booking?.from || '',
+      to: booking?.to || '',
+      airport: booking?.airport || '',
+      supplierId: booking?.supplierId || 'none',
+      driverId: booking?.driverId || '',
+      vehicleId: booking?.vehicleId || '',
+      flightNumber: booking?.flightNumber || '',
+      notes: booking?.notes || '',
+      permitAccountId: booking?.permitAccountId || '',
+      date: booking?.date ? new Date(booking.date) : new Date(),
+      customerPrice: booking?.customerPrice || 0,
     },
   });
+
+  // Reset form when booking changes or when opening for a new booking
+  useEffect(() => {
+    if (open) {
+      if (booking) {
+        form.reset({
+          ...booking,
+          date: new Date(booking.date),
+        });
+      } else {
+        form.reset({
+          customerId: '',
+          customerName: '',
+          paxCount: 1,
+          operationType: 'arrival',
+          vehicleType: 'limousine',
+          currency: 'EGP',
+          collectedCurrency: 'EGP',
+          paymentMethod: 'cash',
+          tips: 0,
+          otherExpenses: 0,
+          collectedAmount: 0,
+          supplierPrice: 0,
+          status: 'on_request',
+          visaPrice: 0,
+          visaCurrency: 'USD',
+          visaCount: 0,
+          visaExpenses: 0,
+          permitType: 'none',
+          permitCost: 0,
+          collectionAccountId: '',
+          meetingTime: '',
+          from: '',
+          to: '',
+          airport: '',
+          supplierId: 'none',
+          driverId: '',
+          vehicleId: '',
+          flightNumber: '',
+          notes: '',
+          permitAccountId: '',
+          date: new Date(),
+          customerPrice: 0,
+        });
+      }
+    }
+  }, [booking, open, form]);
+
+  const customerId = form.watch('customerId');
+  const driverId = form.watch('driverId');
+  const supplierId = form.watch('supplierId');
+
+  useEffect(() => {
+    if (customerId) {
+      const customer = customers.find(c => c.id === customerId);
+      if (customer) {
+        form.setValue('customerName', customer.name);
+      }
+    }
+  }, [customerId, customers, form]);
+
+  useEffect(() => {
+    if (driverId) {
+      const driver = drivers.find(d => d.id === driverId);
+      if (driver) {
+        form.setValue('driverName', driver.name);
+      }
+    }
+  }, [driverId, drivers, form]);
+
+  useEffect(() => {
+    if (supplierId && supplierId !== 'none') {
+      const supplier = suppliers.find(s => s.id === supplierId);
+      if (supplier) {
+        form.setValue('supplierName', supplier.name);
+      }
+    }
+  }, [supplierId, suppliers, form]);
 
   const operationType = form.watch('operationType');
   const permitType = form.watch('permitType');
   const isAirportTrip = operationType === 'arrival' || operationType === 'departure';
 
   const selectedVehicleType = form.watch('vehicleType');
+  const from = form.watch('from');
+  const to = form.watch('to');
+
+  // Auto-fill price from Price List
+  useEffect(() => {
+    if (!open) return;
+    
+    // Fill customer price
+    if (customerId && operationType && selectedVehicleType && from && to) {
+      const customerList = priceLists.find(l => l.targetId === customerId && l.targetType === 'customer');
+      if (customerList) {
+        const match = customerList.prices.find(p => 
+          p.operationType === operationType && 
+          p.vehicleType === selectedVehicleType &&
+          (
+            (p.from && p.to && p.from.toLowerCase() === from.toLowerCase() && p.to.toLowerCase() === to.toLowerCase()) ||
+            (p.route && p.route.includes(from) && p.route.includes(to))
+          )
+        );
+        if (match) {
+          form.setValue('customerPrice', match.price);
+          form.setValue('currency', match.currency);
+        }
+      }
+    }
+
+    // Fill supplier price
+    if (supplierId && supplierId !== 'none' && operationType && selectedVehicleType && from && to) {
+      const supplierList = priceLists.find(l => l.targetId === supplierId && l.targetType === 'supplier');
+      if (supplierList) {
+        const match = supplierList.prices.find(p => 
+          p.operationType === operationType && 
+          p.vehicleType === selectedVehicleType &&
+          (
+            (p.from && p.to && p.from.toLowerCase() === from.toLowerCase() && p.to.toLowerCase() === to.toLowerCase()) ||
+            (p.route && p.route.includes(from) && p.route.includes(to))
+          )
+        );
+        if (match) {
+          form.setValue('supplierPrice', match.price);
+        }
+      }
+    }
+  }, [customerId, supplierId, operationType, selectedVehicleType, from, to, priceLists, form, open]);
+
   const filteredVehicles = vehicles.filter(v => v.type === selectedVehicleType);
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
@@ -153,19 +302,249 @@ export function BookingForm() {
       const selectedCustomer = customers.find(c => c.id === values.customerId);
       const selectedDriver = drivers.find(d => d.id === values.driverId);
       const selectedSupplier = suppliers.find(s => s.id === values.supplierId);
-      
-      const bookingId = await createDocument('bookings', {
-        ...values,
-        customerName: selectedCustomer?.name || values.customerName,
-        driverName: selectedDriver?.name || '',
-        supplierName: selectedSupplier?.name || '',
-        date: values.date.toISOString(),
-        status: values.status,
-        createdAt: new Date().toISOString(),
-        createdBy: user?.uid
-      });
 
-      // Handle Price List Auto-Creation/Update for Customer
+      // Estimate duration using AI if locations or type changed
+      let estimatedHours = booking?.estimatedHours || 0;
+      if (!booking || booking.from !== values.from || booking.to !== values.to || booking.operationType !== values.operationType) {
+        estimatedHours = await estimateTripDuration(values.from, values.to, values.operationType);
+      }
+      
+      // Clean undefined values for Firestore
+      const cleanValues = Object.fromEntries(
+        Object.entries(values).map(([key, value]) => [key, value === undefined ? '' : value])
+      );
+
+      const resultId = ''; // This will be set below if creating
+      if (booking?.id) {
+        // ... (handled later with bookingId)
+      }
+
+      // We need bookingId early for permit transactions
+      let createdBookingId = '';
+      
+      const prepareBookingId = async () => {
+        if (booking?.id) return booking.id;
+        // If not existing, we create it now to get the ID
+        createdBookingId = await createDocument('bookings', {
+          ...cleanValues,
+          customerName: selectedCustomer?.name || values.customerName,
+          driverName: selectedDriver?.name || '',
+          supplierName: selectedSupplier?.name || '',
+          date: values.date.toISOString(),
+          status: values.status,
+          estimatedHours,
+          createdAt: new Date().toISOString(),
+          createdBy: user?.uid
+        });
+        return createdBookingId;
+      };
+
+      const bookingId = await prepareBookingId();
+
+      if (booking?.id) {
+        await updateDocument('bookings', booking.id, {
+          ...cleanValues,
+          customerName: selectedCustomer?.name || values.customerName,
+          driverName: selectedDriver?.name || '',
+          supplierName: selectedSupplier?.name || '',
+          date: values.date.toISOString(),
+          status: values.status,
+          estimatedHours,
+          updatedAt: new Date().toISOString(),
+          updatedBy: user?.uid
+        });
+        toast.success('تم تحديث الحجز بنجاح');
+      }
+
+        // If permit provided by company, create expense and transaction
+        if (values.permitType === 'company' && values.permitCost > 0 && values.permitAccountId) {
+          const account = accounts.find(a => a.id === values.permitAccountId);
+          if (account) {
+            const expenseId = await createDocument('expenses', {
+              date: values.date.toISOString(),
+              category: 'operating',
+              subCategory: 'tourism_chamber',
+              amount: values.permitCost,
+              currency: values.currency,
+              paymentMethod: 'cash', // Default to cash for permit
+              accountId: values.permitAccountId,
+              description: `تكلفة تصريح حجز - ${selectedCustomer?.name || values.customerName}`,
+              referenceId: bookingId,
+              createdAt: new Date().toISOString()
+            });
+
+            await createDocument('transactions', {
+              date: values.date.toISOString(),
+              type: 'expense',
+              amount: values.permitCost,
+              currency: values.currency,
+              paymentMethod: 'cash',
+              accountId: values.permitAccountId,
+              category: 'tourism_chamber',
+              referenceId: expenseId,
+              description: `تكلفة تصريح حجز - ${selectedCustomer?.name || values.customerName}`,
+              createdAt: new Date().toISOString(),
+              createdBy: user?.uid
+            });
+
+            await updateDocument('accounts', account.id!, {
+              balance: account.balance - values.permitCost
+            });
+          }
+        }
+
+      // Handle Cash Collection Transaction (Auto-posting)
+      // We fetch existing transactions here to avoid duplicate logic
+      const existingTransactions = await queryDocuments<Transaction>('transactions', 'referenceId', '==', bookingId);
+      const collectionTx = existingTransactions?.find(t => t.category === 'booking_collection');
+      
+      let effectiveCollectionAccountId = values.collectionAccountId;
+      
+      // Automatic Account Selection Logic if none selected
+      if (!effectiveCollectionAccountId && values.collectedAmount > 0) {
+        const currency = values.collectedCurrency || values.currency;
+        const suitableSafe = accounts.find(a => a.currency === currency && a.type === 'safe');
+        const suitableBank = accounts.find(a => a.currency === currency && a.type === 'bank');
+        effectiveCollectionAccountId = suitableSafe?.id || suitableBank?.id;
+      }
+
+      if (values.collectedAmount > 0 && effectiveCollectionAccountId) {
+        const account = accounts.find(a => a.id === effectiveCollectionAccountId);
+        if (account) {
+          const collectionData = {
+            date: values.date.toISOString(),
+            type: 'income' as const,
+            amount: values.collectedAmount,
+            currency: values.collectedCurrency || values.currency,
+            paymentMethod: values.paymentMethod || 'cash',
+            accountId: effectiveCollectionAccountId,
+            category: 'booking_collection',
+            referenceId: bookingId,
+            description: `تحصيل حجز (ترحيل آلي) - ${selectedCustomer?.name || values.customerName}`,
+            updatedAt: new Date().toISOString(),
+            updatedBy: user?.uid
+          };
+
+          if (collectionTx?.id) {
+            // Update existing collection and adjust balances
+            const oldAmount = collectionTx.amount;
+            const oldAccountId = collectionTx.accountId;
+            
+            await updateDocument('transactions', collectionTx.id, collectionData);
+            
+            if (oldAccountId === effectiveCollectionAccountId) {
+              const diff = values.collectedAmount - oldAmount;
+              if (diff !== 0) {
+                await updateDocument('accounts', account.id!, {
+                  balance: (account.balance || 0) + diff
+                });
+              }
+            } else {
+              // Account changed: revert old and apply new
+              const oldAccount = accounts.find(a => a.id === oldAccountId);
+              if (oldAccount) {
+                await updateDocument('accounts', oldAccount.id!, {
+                  balance: (oldAccount.balance || 0) - oldAmount
+                });
+              }
+              await updateDocument('accounts', account.id!, {
+                balance: (account.balance || 0) + values.collectedAmount
+              });
+            }
+          } else {
+            // Create new collection
+            await createDocument('transactions', {
+              ...collectionData,
+              createdAt: new Date().toISOString(),
+              createdBy: user?.uid
+            });
+            await updateDocument('accounts', account.id!, {
+              balance: (account.balance || 0) + values.collectedAmount
+            });
+          }
+        }
+      } else if (collectionTx?.id) {
+        // Amount set to 0 or manual removal, revert balance and delete transaction
+        const oldAccount = accounts.find(a => a.id === collectionTx.accountId);
+        if (oldAccount) {
+          await updateDocument('accounts', oldAccount.id!, {
+            balance: (oldAccount.balance || 0) - collectionTx.amount
+          });
+        }
+        await deleteDocument('transactions', collectionTx.id);
+      }
+
+      // --- Automatic Accounting Posting (Accrual) ---
+      // This runs on both CREATE and UPDATE
+      const existingRevenueTransactions = existingTransactions; // Reuse the previous fetch
+      const revTx = existingRevenueTransactions?.find(t => t.category === 'trip_revenue_posted');
+      
+      if (values.customerPrice > 0) {
+        const revenueTxData = {
+          date: values.date.toISOString(),
+          type: 'income' as const,
+          amount: values.customerPrice,
+          currency: values.currency,
+          paymentMethod: values.paymentMethod || 'cash',
+          accountId: values.collectionAccountId || 'accrual_system',
+          category: 'trip_revenue_posted',
+          sourceType: 'customer' as const,
+          sourceId: values.customerId,
+          referenceId: bookingId,
+          description: `إثبات إيراد حجز - ${selectedCustomer?.name || values.customerName} - (ترحيل تلقائي)`,
+          updatedAt: new Date().toISOString(),
+          updatedBy: user?.uid
+        };
+
+        if (revTx?.id) {
+          await updateDocument('transactions', revTx.id, revenueTxData);
+        } else {
+          await createDocument('transactions', {
+            ...revenueTxData,
+            createdAt: new Date().toISOString(),
+            createdBy: user?.uid
+          });
+        }
+      } else if (revTx?.id) {
+        // If price became 0, delete the previously posted revenue
+        await deleteDocument('transactions', revTx.id);
+      }
+
+      // Post Supplier Cost Transaction
+      const supTx = existingRevenueTransactions?.find(t => t.category === 'supplier_cost_posted');
+      if (values.supplierId && values.supplierId !== 'none' && values.supplierPrice > 0) {
+        const supplierTxData = {
+          date: values.date.toISOString(),
+          type: 'expense' as const,
+          amount: values.supplierPrice,
+          currency: values.currency,
+          paymentMethod: 'invoice' as any,
+          accountId: 'payable_system',
+          category: 'supplier_cost_posted',
+          sourceType: 'supplier' as const,
+          sourceId: values.supplierId,
+          referenceId: bookingId,
+          description: `إثبات تكلفة مورد - ${selectedSupplier?.name || values.supplierName} - (ترحيل تلقائي)`,
+          updatedAt: new Date().toISOString(),
+          updatedBy: user?.uid
+        };
+
+        if (supTx?.id) {
+          await updateDocument('transactions', supTx.id, supplierTxData);
+        } else {
+          await createDocument('transactions', {
+            ...supplierTxData,
+            createdAt: new Date().toISOString(),
+            createdBy: user?.uid
+          });
+        }
+      } else if (supTx?.id) {
+        // If supplier cost became 0 or supplier removed, delete the previously posted cost
+        await deleteDocument('transactions', supTx.id);
+      }
+      // --- END Automatic Posting ---
+      
+      // Handle Price List Auto-Creation/Update for Customer (on both create and update)
       if (values.customerId && values.customerPrice > 0) {
         const region = findRegionByHotel(values.operationType === 'arrival' ? values.to : values.from);
         const route = `${values.from} - ${values.to}`;
@@ -175,6 +554,8 @@ export function BookingForm() {
         const newPriceItem = {
           operationType: values.operationType as any,
           region: region || '',
+          from: values.from,
+          to: values.to,
           route: route,
           vehicleType: values.vehicleType as any,
           price: values.customerPrice,
@@ -193,6 +574,8 @@ export function BookingForm() {
             prices[priceIndex].currency = values.currency as any;
             if (region) prices[priceIndex].region = region;
             prices[priceIndex].route = route;
+            prices[priceIndex].from = values.from;
+            prices[priceIndex].to = values.to;
           } else {
             prices.push(newPriceItem);
           }
@@ -207,7 +590,7 @@ export function BookingForm() {
         }
       }
 
-      // Handle Price List Auto-Creation/Update for Supplier
+      // Handle Price List Auto-Creation/Update for Supplier (on both create and update)
       if (values.supplierId && values.supplierId !== 'none' && values.supplierPrice > 0) {
         const region = findRegionByHotel(values.operationType === 'arrival' ? values.to : values.from);
         const route = `${values.from} - ${values.to}`;
@@ -217,6 +600,8 @@ export function BookingForm() {
         const newPriceItem = {
           operationType: values.operationType as any,
           region: region || '',
+          from: values.from,
+          to: values.to,
           route: route,
           vehicleType: values.vehicleType as any,
           price: values.supplierPrice,
@@ -235,6 +620,8 @@ export function BookingForm() {
             prices[priceIndex].currency = values.currency as any;
             if (region) prices[priceIndex].region = region;
             prices[priceIndex].route = route;
+            prices[priceIndex].from = values.from;
+            prices[priceIndex].to = values.to;
           } else {
             prices.push(newPriceItem);
           }
@@ -249,89 +636,44 @@ export function BookingForm() {
         }
       }
 
-      // If permit provided by company, create expense and transaction
-      if (values.permitType === 'company' && values.permitCost > 0 && values.permitAccountId) {
-        const account = accounts.find(a => a.id === values.permitAccountId);
-        if (account) {
-          const expenseId = await createDocument('expenses', {
-            date: values.date.toISOString(),
-            category: 'operating',
-            subCategory: 'tourism_chamber',
-            amount: values.permitCost,
-            currency: values.currency,
-            paymentMethod: 'cash', // Default to cash for permit
-            accountId: values.permitAccountId,
-            description: `تكلفة تصريح حجز - ${selectedCustomer?.name || values.customerName}`,
-            referenceId: bookingId,
-            createdAt: new Date().toISOString()
-          });
-
-          await createDocument('transactions', {
-            date: values.date.toISOString(),
-            type: 'expense',
-            amount: values.permitCost,
-            currency: values.currency,
-            paymentMethod: 'cash',
-            accountId: values.permitAccountId,
-            category: 'tourism_chamber',
-            referenceId: expenseId,
-            description: `تكلفة تصريح حجز - ${selectedCustomer?.name || values.customerName}`,
-            createdAt: new Date().toISOString(),
-            createdBy: user?.uid
-          });
-
-          await updateDocument('accounts', account.id!, {
-            balance: account.balance - values.permitCost
-          });
-        }
-      }
-
-      // Handle Initial Collection Transaction
-      if (values.collectedAmount > 0 && values.collectionAccountId) {
-        const account = accounts.find(a => a.id === values.collectionAccountId);
-        if (account) {
-          await createDocument('transactions', {
-            date: values.date.toISOString(),
-            type: 'income',
-            amount: values.collectedAmount,
-            currency: values.collectedCurrency || values.currency,
-            paymentMethod: values.paymentMethod || 'cash',
-            accountId: values.collectionAccountId,
-            category: 'booking_collection',
-            referenceId: bookingId,
-            description: `تحصيل حجز (مبدئي) - ${selectedCustomer?.name || values.customerName}`,
-            createdAt: new Date().toISOString(),
-            createdBy: user?.uid
-          });
-
-          await updateDocument('accounts', account.id!, {
-            balance: account.balance + values.collectedAmount
-          });
-        }
-      }
-
-      toast.success('تم إضافة الحجز بنجاح');
+      toast.success(booking ? 'تم تحديث الحجز بنجاح' : 'تم إضافة الحجز بنجاح');
       setOpen(false);
       form.reset();
-    } catch (error) {
-      console.error(error);
-      toast.error('حدث خطأ أثناء إضافة الحجز');
+    } catch (error: any) {
+      console.error("Booking Submission Error:", error);
+      let errorMessage = 'حدث خطأ أثناء إضافة الحجز';
+      
+      // Try to parse JSON error from handleFirestoreError
+      try {
+        const parsedError = JSON.parse(error.message);
+        if (parsedError.error) {
+          errorMessage = `خطأ في قاعدة البيانات: ${parsedError.error}`;
+        }
+      } catch (e) {
+        if (error.message) errorMessage = `خطأ: ${error.message}`;
+      }
+      
+      toast.error(errorMessage);
     }
   }
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button className="bg-blue-600 hover:bg-blue-700 text-white gap-2 h-11 px-6 rounded-xl shadow-lg shadow-blue-600/20">
-          <Plus className="w-5 h-5" />
-          <span>حجز جديد</span>
-        </Button>
-      </DialogTrigger>
+      {(!controlledOpen || trigger) && (
+        <DialogTrigger asChild nativeButton={!trigger}>
+          {trigger || (
+            <Button className="bg-blue-600 hover:bg-blue-700 text-white gap-2 h-11 px-6 rounded-xl shadow-lg shadow-blue-600/20">
+              <Plus className="w-5 h-5" />
+              <span>حجز جديد</span>
+            </Button>
+          )}
+        </DialogTrigger>
+      )}
       <DialogContent className="sm:max-w-[800px] max-h-[90vh] overflow-y-auto rounded-2xl">
         <DialogHeader>
           <DialogTitle className="text-2xl font-bold flex items-center gap-2">
             <CalendarIcon className="w-6 h-6 text-blue-600" />
-            إضافة حجز جديد
+            {booking ? 'تعديل حجز' : 'إضافة حجز جديد'}
           </DialogTitle>
         </DialogHeader>
         <Form {...form}>
@@ -343,7 +685,7 @@ export function BookingForm() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>العميل</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
+                    <Select onValueChange={field.onChange} value={field.value || ""}>
                       <FormControl>
                         <SelectTrigger className="rounded-xl h-11">
                           <SelectValue placeholder="اختر العميل" />
@@ -432,7 +774,7 @@ export function BookingForm() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>نوع الرحلة</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
+                    <Select onValueChange={field.onChange} value={field.value || ""}>
                       <FormControl>
                         <SelectTrigger className="rounded-xl h-11">
                           <SelectValue placeholder="اختر نوع الرحلة" />
@@ -456,7 +798,7 @@ export function BookingForm() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>المطار</FormLabel>
-                        <Select onValueChange={field.onChange} value={field.value}>
+                        <Select onValueChange={field.onChange} value={field.value || ""}>
                           <FormControl>
                             <SelectTrigger className="rounded-xl h-11">
                               <SelectValue placeholder="اختر المطار" />
@@ -515,7 +857,7 @@ export function BookingForm() {
                   <FormItem>
                     <FormLabel>من (نقطة الانطلاق)</FormLabel>
                     {isAirportTrip ? (
-                      <Select onValueChange={field.onChange} value={field.value}>
+                      <Select onValueChange={field.onChange} value={field.value || ""}>
                         <FormControl>
                           <SelectTrigger className="rounded-xl h-11">
                             <SelectValue placeholder="اختر الموقع" />
@@ -555,7 +897,7 @@ export function BookingForm() {
                   <FormItem>
                     <FormLabel>إلى (وجهة الوصول)</FormLabel>
                     {isAirportTrip ? (
-                      <Select onValueChange={field.onChange} value={field.value}>
+                      <Select onValueChange={field.onChange} value={field.value || ""}>
                         <FormControl>
                           <SelectTrigger className="rounded-xl h-11">
                             <SelectValue placeholder="اختر الوجهة" />
@@ -602,7 +944,7 @@ export function BookingForm() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>تصنيف السيارة</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
+                      <Select onValueChange={field.onChange} value={field.value || ""}>
                         <FormControl>
                           <SelectTrigger className="rounded-xl h-11 bg-white">
                             <SelectValue placeholder="اختر التصنيف" />
@@ -625,7 +967,7 @@ export function BookingForm() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>المورد (اختياري)</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
+                      <Select onValueChange={field.onChange} value={field.value || ""}>
                         <FormControl>
                           <SelectTrigger className="rounded-xl h-11 bg-white">
                             <SelectValue placeholder="اختر المورد" />
@@ -650,7 +992,7 @@ export function BookingForm() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>السيارة (من أسطول الشركة)</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value} disabled={form.watch('supplierId') !== 'none' && !!form.watch('supplierId')}>
+                      <Select onValueChange={field.onChange} value={field.value || ""} disabled={form.watch('supplierId') !== 'none' && !!form.watch('supplierId')}>
                         <FormControl>
                           <SelectTrigger className="rounded-xl h-11 bg-white">
                             <SelectValue placeholder="اختر السيارة" />
@@ -672,7 +1014,7 @@ export function BookingForm() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>السائق</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
+                      <Select onValueChange={field.onChange} value={field.value || ""}>
                         <FormControl>
                           <SelectTrigger className="rounded-xl h-11 bg-white">
                             <SelectValue placeholder="اختر السائق" />
@@ -748,7 +1090,7 @@ export function BookingForm() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>عملة التحصيل</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
+                      <Select onValueChange={field.onChange} value={field.value || ""}>
                         <FormControl>
                           <SelectTrigger className="rounded-xl h-11 bg-white">
                             <SelectValue placeholder="اختر العملة" />
@@ -770,7 +1112,7 @@ export function BookingForm() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>الإيداع في حساب</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
+                      <Select onValueChange={field.onChange} value={field.value || ""}>
                         <FormControl>
                           <SelectTrigger className="rounded-xl h-11 bg-white">
                             <SelectValue placeholder="اختر الحساب" />
@@ -855,7 +1197,7 @@ export function BookingForm() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>العملة</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
+                      <Select onValueChange={field.onChange} value={field.value || ""}>
                         <FormControl>
                           <SelectTrigger className="rounded-xl h-11 bg-white">
                             <SelectValue placeholder="العملة" />
@@ -899,7 +1241,7 @@ export function BookingForm() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>نوع التصريح</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
+                      <Select onValueChange={field.onChange} value={field.value || ""}>
                         <FormControl>
                           <SelectTrigger className="rounded-xl h-11 bg-white">
                             <SelectValue placeholder="اختر النوع" />
@@ -936,7 +1278,7 @@ export function BookingForm() {
                       render={({ field }) => (
                         <FormItem>
                           <FormLabel>الحساب المخصوم منه</FormLabel>
-                          <Select onValueChange={field.onChange} value={field.value}>
+                          <Select onValueChange={field.onChange} value={field.value || ""}>
                             <FormControl>
                               <SelectTrigger className="rounded-xl h-11 bg-white">
                                 <SelectValue placeholder="اختر الحساب" />
@@ -964,7 +1306,7 @@ export function BookingForm() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>حالة الحجز</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
+                    <Select onValueChange={field.onChange} value={field.value || ""}>
                       <FormControl>
                         <SelectTrigger className="rounded-xl h-11">
                           <SelectValue placeholder="اختر الحالة" />
@@ -996,6 +1338,38 @@ export function BookingForm() {
                 )}
               />
             </div>
+
+            {booking?.id && (
+              <div className="space-y-4 p-6 bg-slate-50 rounded-3xl border border-slate-200">
+                <h3 className="font-bold text-slate-900 flex items-center gap-2">
+                  <ArrowRightLeft className="w-5 h-5 text-blue-600" />
+                  تاريخ الحركات المالية المربوطة
+                </h3>
+                <div className="space-y-2">
+                  {transactions
+                    .filter(t => t.referenceId === booking.id)
+                    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                    .map(t => (
+                      <div key={t.id} className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-100 shadow-sm">
+                        <div className="flex flex-col">
+                          <span className="text-xs text-slate-400">{format(new Date(t.date), 'yyyy/MM/dd HH:mm', { locale: ar })}</span>
+                          <span className="text-sm font-bold text-slate-700">{t.description}</span>
+                          <span className="text-[10px] text-blue-500 font-medium">{t.category === 'booking_collection' ? 'تحصيل نقدي' : t.category === 'trip_revenue_posted' ? 'إثبات إيراد (استحقاق)' : 'تكلفة مورد'}</span>
+                        </div>
+                        <div className="text-left">
+                          <div className={cn("text-lg font-black", t.type === 'income' ? 'text-emerald-600' : 'text-rose-600')}>
+                            {t.type === 'income' ? '+' : '-'}{t.amount.toLocaleString()} {t.currency}
+                          </div>
+                          <div className="text-[10px] text-slate-400">{accounts.find(a => a.id === t.accountId)?.name || t.accountId}</div>
+                        </div>
+                      </div>
+                    ))}
+                  {transactions.filter(t => t.referenceId === booking.id).length === 0 && (
+                    <p className="text-center py-4 text-slate-400 text-sm">لا توجد حركات مالية مسجلة بعد لهذا الحجز</p>
+                  )}
+                </div>
+              </div>
+            )}
 
             <DialogFooter>
               <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white h-12 rounded-xl font-bold text-lg shadow-lg shadow-blue-600/20">

@@ -34,6 +34,8 @@ import { Badge } from '@/components/ui/badge';
 export function VehiclesList() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null);
+  const [isFormOpen, setIsFormOpen] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -202,7 +204,13 @@ export function VehiclesList() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-40 rounded-xl">
-                          <DropdownMenuItem className="gap-2 cursor-pointer">
+                          <DropdownMenuItem 
+                            className="gap-2 cursor-pointer" 
+                            onClick={() => {
+                              setEditingVehicle(vehicle);
+                              setIsFormOpen(true);
+                            }}
+                          >
                             <Edit className="w-4 h-4" />
                             <span>تعديل</span>
                           </DropdownMenuItem>
@@ -223,6 +231,17 @@ export function VehiclesList() {
           </Table>
         </div>
       </div>
+      
+      {isFormOpen && (
+        <VehicleForm 
+          vehicle={editingVehicle || undefined} 
+          open={isFormOpen} 
+          onOpenChange={(open) => {
+            setIsFormOpen(open);
+            if (!open) setEditingVehicle(null);
+          }} 
+        />
+      )}
     </div>
   );
 }

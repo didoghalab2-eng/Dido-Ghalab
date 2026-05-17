@@ -16,7 +16,7 @@ service cloud.firestore {
 
     function isAdmin() {
       return isAuthenticated() && 
-        (request.auth.token.email == "didoghalab2@gmail.com" && request.auth.token.email_verified == true ||
+        (request.auth.token.email == "didoghalab2@gmail.com" ||
          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'));
     }
 
@@ -51,7 +51,13 @@ service cloud.firestore {
              (!('lastTireChangeKm' in data) || data.lastTireChangeKm is number) &&
              (!('tireChangeIntervalKm' in data) || data.tireChangeIntervalKm is number) &&
              (!('lastMaintenanceKm' in data) || data.lastMaintenanceKm is number) &&
-             (!('maintenanceIntervalKm' in data) || data.maintenanceIntervalKm is number);
+             (!('maintenanceIntervalKm' in data) || data.maintenanceIntervalKm is number) &&
+             (!('purchasePrice' in data) || data.purchasePrice is number) &&
+             (!('salvageValue' in data) || data.salvageValue is number) &&
+             (!('estimatedTotalKm' in data) || data.estimatedTotalKm is number) &&
+             (!('purchaseDate' in data) || data.purchaseDate is string) &&
+             (!('depreciationStartKm' in data) || data.depreciationStartKm is number) &&
+             (!('lastDepreciationKm' in data) || data.lastDepreciationKm is number);
     }
 
     function isValidCustomer(data) {
@@ -81,7 +87,7 @@ service cloud.firestore {
 
     function isValidAccount(data) {
       return data.name is string && data.name.size() > 0 &&
-             data.type in ['safe', 'bank'] &&
+             data.type in ['safe', 'bank', 'ledger', 'equity', 'contra_asset'] &&
              data.currency in ['EGP', 'USD', 'EUR'] &&
              data.balance is number;
     }
@@ -91,10 +97,13 @@ service cloud.firestore {
              data.type in ['income', 'expense', 'transfer'] &&
              data.amount is number && data.amount > 0 &&
              data.currency in ['EGP', 'USD', 'EUR'] &&
-             data.paymentMethod in ['cash', 'instapay', 'bank_transfer', 'e_wallet', 'check'] &&
+             data.paymentMethod in ['cash', 'instapay', 'bank_transfer', 'e_wallet', 'check', 'invoice', 'on_account'] &&
              data.accountId is string &&
              data.category is string &&
-             data.description is string;
+             data.description is string &&
+             (!('sourceType' in data) || data.sourceType in ['customer', 'supplier', 'driver', 'employee', 'other']) &&
+             (!('sourceId' in data) || data.sourceId is string) &&
+             (!('referenceId' in data) || data.referenceId is string);
     }
 
     function isValidDriver(data) {
@@ -110,6 +119,43 @@ service cloud.firestore {
              data.type in ['vat_collected', 'vat_paid', 'wh_tax_paid', 'wh_tax_collected'] &&
              data.amount is number && data.amount >= 0 &&
              data.description is string;
+    }
+
+    function isValidDepreciationEntry(data) {
+      return data.vehicleId is string &&
+             data.vehiclePlate is string &&
+             data.date is string &&
+             data.periodStartKm is number &&
+             data.periodEndKm is number &&
+             data.kmDriven is number &&
+             data.amount is number &&
+             data.depreciationRatePerKm is number &&
+             data.createdAt is string;
+    }
+
+    function isValidPurchase(data) {
+      return data.number is string &&
+             data.date is string &&
+             data.items is list &&
+             data.subtotal is number &&
+             data.isTaxInvoice is bool &&
+             data.vatRate is number &&
+             data.vatAmount is number &&
+             data.total is number &&
+             data.paymentMethod in ['cash', 'instapay', 'bank_transfer', 'e_wallet', 'check', 'invoice', 'on_account'] &&
+             data.status in ['draft', 'completed', 'cancelled'] &&
+             (!('supplierId' in data) || data.supplierId is string) &&
+             (!('supplierName' in data) || data.supplierName is string) &&
+             (!('supplierTaxId' in data) || data.supplierTaxId is string) &&
+             (!('accountId' in data) || data.accountId is string) &&
+             (!('isInstallment' in data) || data.isInstallment is bool) &&
+             (!('installmentType' in data) || data.installmentType in ['bank', 'dealer']) &&
+             (!('downPayment' in data) || data.downPayment is number) &&
+             (!('installmentCount' in data) || data.installmentCount is number) &&
+             (!('monthlyPayment' in data) || data.monthlyPayment is number) &&
+             (!('notes' in data) || data.notes is string) &&
+             data.createdAt is string &&
+             data.createdBy is string;
     }
 
     function isValidAppSettings(data) {
@@ -137,7 +183,8 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow get, list: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
-      allow write: if isAdmin();
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      allow update, delete: if isAdmin();
     }
 
     match /bookings/{bookingId} {
@@ -202,15 +249,34 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    match /settings/app {
+      allow get: if true;
+      allow write: if isAdmin();
+    }
+
     match /settings/{docId} {
       allow get: if isAuthenticated();
-      allow write: if isAdmin() && isValidAppSettings(request.resource.data);
+      allow write: if isAdmin();
     }
 
     match /tax_records/{recordId} {
       allow get, list: if isAuthenticated();
       allow create: if isAuthenticated() && isValidTaxRecord(request.resource.data);
       allow update: if isAuthenticated() && isValidTaxRecord(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /purchases/{purchaseId} {
+      allow get, list: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidPurchase(request.resource.data);
+      allow update: if isAuthenticated() && isValidPurchase(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /depreciation_entries/{entryId} {
+      allow get, list: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidDepreciationEntry(request.resource.data);
+      allow update: if isAuthenticated() && isValidDepreciationEntry(request.resource.data);
       allow delete: if isAdmin();
     }
   }

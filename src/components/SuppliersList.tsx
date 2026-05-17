@@ -32,6 +32,8 @@ import { toast } from 'sonner';
 export function SuppliersList() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
+  const [isFormOpen, setIsFormOpen] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -86,6 +88,7 @@ export function SuppliersList() {
             <TableHeader>
               <TableRow className="bg-slate-50/50 hover:bg-slate-50/50">
                 <TableHead className="text-right font-bold text-slate-900">المورد</TableHead>
+                <TableHead className="text-right font-bold text-slate-900">النوع</TableHead>
                 <TableHead className="text-right font-bold text-slate-900">رقم الهاتف</TableHead>
                 <TableHead className="text-right font-bold text-slate-900">البريد الإلكتروني</TableHead>
                 <TableHead className="text-left font-bold text-slate-900">الإجراءات</TableHead>
@@ -116,6 +119,15 @@ export function SuppliersList() {
                       </div>
                     </TableCell>
                     <TableCell>
+                      <span className={`px-3 py-1 rounded-full text-xs font-bold ${
+                        supplier.type === 'service' 
+                        ? 'bg-purple-100 text-purple-700' 
+                        : 'bg-orange-100 text-orange-700'
+                      }`}>
+                        {supplier.type === 'service' ? 'مورد خدمات' : 'مورد تجاري/أصول'}
+                      </span>
+                    </TableCell>
+                    <TableCell>
                       <div className="flex items-center gap-2 text-slate-600">
                         <Phone className="w-4 h-4 text-slate-400" />
                         <span dir="ltr">{supplier.phone}</span>
@@ -135,7 +147,13 @@ export function SuppliersList() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-40 rounded-xl">
-                          <DropdownMenuItem className="gap-2 cursor-pointer">
+                          <DropdownMenuItem 
+                            className="gap-2 cursor-pointer" 
+                            onClick={() => {
+                              setEditingSupplier(supplier);
+                              setIsFormOpen(true);
+                            }}
+                          >
                             <Edit className="w-4 h-4" />
                             <span>تعديل</span>
                           </DropdownMenuItem>
@@ -156,6 +174,17 @@ export function SuppliersList() {
           </Table>
         </div>
       </div>
+      
+      {isFormOpen && (
+        <SupplierForm 
+          supplier={editingSupplier || undefined} 
+          open={isFormOpen} 
+          onOpenChange={(open) => {
+            setIsFormOpen(open);
+            if (!open) setEditingSupplier(null);
+          }} 
+        />
+      )}
     </div>
   );
 }

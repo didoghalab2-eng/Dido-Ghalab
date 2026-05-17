@@ -36,6 +36,8 @@ import { Badge } from '@/components/ui/badge';
 export function CustomersList() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+  const [isFormOpen, setIsFormOpen] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -174,7 +176,13 @@ export function CustomersList() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-48 rounded-xl">
-                          <DropdownMenuItem className="gap-2 cursor-pointer">
+                          <DropdownMenuItem 
+                            className="gap-2 cursor-pointer" 
+                            onClick={() => {
+                              setEditingCustomer(customer);
+                              setIsFormOpen(true);
+                            }}
+                          >
                             <Edit className="w-4 h-4" />
                             <span>تعديل البيانات</span>
                           </DropdownMenuItem>
@@ -199,6 +207,17 @@ export function CustomersList() {
           </Table>
         </div>
       </div>
+      
+      {isFormOpen && (
+        <CustomerForm 
+          customer={editingCustomer || undefined} 
+          open={isFormOpen} 
+          onOpenChange={(open) => {
+            setIsFormOpen(open);
+            if (!open) setEditingCustomer(null);
+          }} 
+        />
+      )}
     </div>
   );
 }

@@ -46,21 +46,28 @@ const collectionSchema = z.object({
 interface CollectionFormProps {
   booking: Booking;
   trigger?: React.ReactNode;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
-export function CollectionForm({ booking, trigger }: CollectionFormProps) {
+export function CollectionForm({ booking, trigger, open: controlledOpen, onOpenChange: setControlledOpen }: CollectionFormProps) {
   const { user } = useAuth();
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  
+  const open = controlledOpen !== undefined ? controlledOpen : internalOpen;
+  const setOpen = setControlledOpen !== undefined ? setControlledOpen : setInternalOpen;
   const [accounts, setAccounts] = useState<Account[]>([]);
 
   const form = useForm<z.infer<typeof collectionSchema>>({
     resolver: zodResolver(collectionSchema),
     defaultValues: {
       amount: booking.customerPrice - (booking.collectedAmount || 0),
-      currency: booking.currency,
+      currency: booking.currency || 'EGP',
       paymentMethod: 'cash',
       accountId: '',
       description: `تحصيل حجز - ${booking.customerName} - ${booking.from} إلى ${booking.to}`,
+      checkNumber: '',
+      checkDueDate: '',
     },
   });
 
@@ -120,7 +127,7 @@ export function CollectionForm({ booking, trigger }: CollectionFormProps) {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
+      <DialogTrigger asChild nativeButton={!trigger}>
         {trigger || (
           <Button variant="outline" size="sm" className="gap-2">
             <DollarSign className="w-4 h-4" />
@@ -171,7 +178,7 @@ export function CollectionForm({ booking, trigger }: CollectionFormProps) {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>العملة</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
+                    <Select onValueChange={field.onChange} value={field.value || ""}>
                       <FormControl>
                         <SelectTrigger className="rounded-xl h-11">
                           <SelectValue />
@@ -195,7 +202,7 @@ export function CollectionForm({ booking, trigger }: CollectionFormProps) {
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>طريقة التحصيل</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value}>
+                  <Select onValueChange={field.onChange} value={field.value || ""}>
                     <FormControl>
                       <SelectTrigger className="rounded-xl h-11">
                         <SelectValue />
@@ -220,7 +227,7 @@ export function CollectionForm({ booking, trigger }: CollectionFormProps) {
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>الإيداع في حساب</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value}>
+                  <Select onValueChange={field.onChange} value={field.value || ""}>
                     <FormControl>
                       <SelectTrigger className="rounded-xl h-11">
                         <SelectValue placeholder="اختر الحساب" />
